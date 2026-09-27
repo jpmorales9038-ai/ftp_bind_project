@@ -18,12 +18,36 @@ INSTALL_LOG="$MODDIR/install.log"
 VERSION_MARKER="$MODDIR/.installed_version"
 CURRENT_VERSION="$(grep '^versionCode=' "$MODDIR/module.prop" | cut -d= -f2)"
 
+# Se usa "cmd package install/uninstall" en vez de "pm install/uninstall".
+# El binario "pm" (para install/uninstall) abre un socket propio hacia
+# system_server con una llamada Binder distinta a la que usa "cmd", y esa
+# llamada puntual queda bloqueada por la política SELinux del dominio
+# "su" con el que corre el root de KernelSU (confirmado: mismo error
+# reproducido y resuelto igual en issues de KernelSU/APatch para procesos
+# corriendo en ese dominio, ver tiann/KernelSU#2218). "cmd package" pasa
+# por el despachador de comandos de shell del servicio y no pisa esa
+# restricción, con las mismas opciones (-r, etc.). Se deja "pm" como
+# respaldo por si el dispositivo no tuviera "cmd" (Android muy viejo).
+pkg_install() {
+    if cmd package install -r "$1" >> "$INSTALL_LOG" 2>&1; then
+        return 0
+    fi
+    pm install -r "$1" >> "$INSTALL_LOG" 2>&1
+}
+
+pkg_uninstall() {
+    if cmd package uninstall "$1" >> "$INSTALL_LOG" 2>&1; then
+        return 0
+    fi
+    pm uninstall "$1" >> "$INSTALL_LOG" 2>&1
+}
+
 if [ -f "$APK_SRC" ] && [ "$(cat "$VERSION_MARKER" 2>/dev/null)" != "$CURRENT_VERSION" ]; then
     cp "$APK_SRC" "$APK_TMP"
     # installd lee el APK con otro UID que el "cp" como root: sin esto,
     # falla con el mismo error genérico por permisos, no por el binder.
     chmod 644 "$APK_TMP"
-    if pm install -r "$APK_TMP" >> "$INSTALL_LOG" 2>&1; then
+    if pkg_install "$APK_TMP"; then
         echo "$CURRENT_VERSION" > "$VERSION_MARKER"
         echo "$(date): App instalada/actualizada a v$CURRENT_VERSION" >> "$INSTALL_LOG"
     else
@@ -31,8 +55,8 @@ if [ -f "$APK_SRC" ] && [ "$(cat "$VERSION_MARKER" 2>/dev/null)" != "$CURRENT_VE
         # distinto), un uninstall + install limpio lo resuelve. La config
         # del FTP no se pierde: vive en $MODDIR/config, no en los datos
         # de la app.
-        pm uninstall com.rclonebind.app >> "$INSTALL_LOG" 2>&1
-        if pm install -r "$APK_TMP" >> "$INSTALL_LOG" 2>&1; then
+        pkg_uninstall com.rclonebind.app
+        if pkg_install "$APK_TMP"; then
             echo "$CURRENT_VERSION" > "$VERSION_MARKER"
             echo "$(date): App reinstalada (limpio) a v$CURRENT_VERSION" >> "$INSTALL_LOG"
         else

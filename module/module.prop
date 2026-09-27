@@ -1,6 +1,6 @@
 id=rclone_ftp_bind
 name=RClone FTP Bind
-version=v0.1.4
-versionCode=5
+version=v0.1.5
+versionCode=6
 author=you
 description=Monta un remoto FTP via rclone y lo expone como bind en el almacenamiento interno.
