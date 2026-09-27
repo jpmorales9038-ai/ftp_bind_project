@@ -27,7 +27,7 @@ jobs:
         run: |
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          curl -sSL -o cmdline-tools.zip \
+          curl -fsSL -o cmdline-tools.zip \
             https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
           mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
@@ -75,7 +75,7 @@ jobs:
 
       - name: Descargar binario de rclone (linux-arm64)
         run: |
-          curl -L -o rclone.zip https://downloads.rclone.org/rclone-current-linux-arm64.zip
+          curl -fL -o rclone.zip https://downloads.rclone.org/rclone-current-linux-arm64.zip
           unzip -q rclone.zip -d rclone_extracted
           cp rclone_extracted/*/rclone module/bin/rclone
           chmod +x module/bin/rclone
@@ -88,9 +88,25 @@ jobs:
       # Bionic. mount.sh ya agrega module/bin al PATH antes de invocar rclone.
       - name: Descargar fusermount3 estático (linux-arm64)
         run: |
-          curl -L -o module/bin/fusermount3 \
+          # "-f" es la parte importante acá: sin ella, "curl -L" no falla
+          # ante un 404 (por ejemplo si cambia el nombre del asset o el tag)
+          # y termina guardando la página de error HTML como si fuera el
+          # binario. El build seguía verde y recién en el teléfono del
+          # usuario tronaba con "exec format error", que es justo lo que
+          # pasó: no era un binario real. Con "-f" el step falla acá mismo,
+          # con un motivo claro, en vez de empaquetar algo roto en silencio.
+          curl -fL -o module/bin/fusermount3 \
             https://github.com/till0196/fusermount3-static/releases/download/v3.18.3/fusermount3-3.18.3-linux-arm64
           chmod +x module/bin/fusermount3
+
+          # Segunda red de seguridad: confirmar que lo descargado sea
+          # realmente un ELF ARM64 y no, por ejemplo, un HTML de error que
+          # curl haya aceptado igual por algún redirect raro.
+          file module/bin/fusermount3
+          file module/bin/fusermount3 | grep -q "ELF 64-bit.*ARM aarch64" || {
+            echo "::error::El archivo descargado no es un ELF ARM64 válido (¿cambió el asset/tag en till0196/fusermount3-static?)"
+            exit 1
+          }
 
       # El APK va DENTRO del módulo (module/app.apk) para que customize.sh
       # lo instale/actualice solo al flashear el módulo desde el Manager.

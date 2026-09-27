@@ -26,6 +26,14 @@ APK_TMP="/data/local/tmp/rclone_ftp_bind.apk"
 if [ -f "$APK_SRC" ]; then
     ui_print "- Instalando/actualizando la app (pm install -r)"
     cp "$APK_SRC" "$APK_TMP"
+    # "cp" como root deja el archivo en /data/local/tmp con permisos
+    # restrictivos (solo root puede leerlo). Pero quien de verdad instala el
+    # paquete es system_server/installd, que lo lee con otro UID — si no
+    # puede abrirlo, pm falla con un error genérico y nada descriptivo
+    # ("Failure calling service package: Failed transaction (2147483646)"),
+    # justo el que se veía en install.log. Con el archivo legible por todos
+    # ya no hay problema de permisos.
+    chmod 644 "$APK_TMP"
     if pm install -r "$APK_TMP" >> "$MODPATH/install.log" 2>&1; then
         ui_print "- App instalada/actualizada correctamente"
     else
