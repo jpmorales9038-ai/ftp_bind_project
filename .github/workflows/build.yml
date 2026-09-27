@@ -1,0 +1,83 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      # No versionamos gradlew/gradle-wrapper.jar en el repo: los generamos
+      # aquí con la Gradle que instaló setup-gradle, así el build es 100%
+      # reproducible desde Actions sin depender de nada preinstalado.
+      - name: Generar Gradle wrapper
+        run: gradle wrapper --gradle-version 8.7
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --console=plain
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+
+  package-module:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descargar binario de rclone (linux-arm64)
+        run: |
+          curl -L -o rclone.zip https://downloads.rclone.org/rclone-current-linux-arm64.zip
+          unzip -q rclone.zip -d rclone_extracted
+          cp rclone_extracted/*/rclone module/bin/rclone
+          chmod +x module/bin/rclone
+
+      - name: Empaquetar módulo KernelSU
+        run: |
+          cd module
+          zip -r ../rclone-ftp-bind-module.zip . -x "bin/README.txt"
+
+      - name: Subir módulo
+        uses: actions/upload-artifact@v4
+        with:
+          name: rclone-ftp-bind-module
+          path: rclone-ftp-bind-module.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ build-app, package-module ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Crear release en GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/app-debug-apk/*.apk
+            dist/rclone-ftp-bind-module/*.zip
