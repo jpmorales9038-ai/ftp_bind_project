@@ -25,6 +25,13 @@ fun HomeScreen(vm: BindViewModel) {
             label = { Text(if (vm.isMounted) "● Montado" else "○ Desmontado") }
         )
 
+        if (vm.rootGranted == false) {
+            Text(
+                "No se detectó acceso root. Concede el permiso a esta app desde KernelSU Manager.",
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+
         Button(onClick = { vm.toggleMount() }, modifier = Modifier.fillMaxWidth()) {
             Text(if (vm.isMounted) "Desmontar" else "Montar")
         }

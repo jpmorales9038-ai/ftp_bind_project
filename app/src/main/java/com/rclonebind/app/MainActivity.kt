@@ -25,11 +25,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Shell.getShell() // pide root al iniciar
+
         setContent {
             MaterialTheme {
                 AppScaffold(vm)
             }
+        }
+
+        // Pedimos root en segundo plano. Si se niega o no hay root
+        // disponible, la app sigue abierta y solo lo mostramos en la UI
+        // en vez de lanzar una excepción no controlada que la cierra.
+        Shell.getShell { shell ->
+            vm.setRootGranted(shell.isRoot)
         }
     }
 }

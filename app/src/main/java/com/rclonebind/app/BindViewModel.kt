@@ -20,6 +20,12 @@ class BindViewModel : ViewModel() {
         private set
     var lastMessage by mutableStateOf<String?>(null)
         private set
+    var rootGranted by mutableStateOf<Boolean?>(null)
+        private set
+
+    fun setRootGranted(granted: Boolean) {
+        rootGranted = granted
+    }
 
     fun refreshStatus() = viewModelScope.launch {
         val result = withContext(Dispatchers.IO) { RootShell.status() }
