@@ -21,12 +21,11 @@ object ModulePaths {
  */
 object RootShell {
 
-    init {
-        Shell.enableVerboseLogging = false
-        Shell.setDefaultBuilder(
-            Shell.Builder.create().setFlags(Shell.FLAG_REDIRECT_STDERR)
-        )
-    }
+    // La configuración del Shell.Builder (flags, logging) se fija una sola vez
+    // en RCloneApp, antes de que exista el shell principal. No repetir aquí:
+    // Shell.setDefaultBuilder() lanza IllegalStateException si se llama
+    // después de que el shell principal ya se creó, y para cuando este
+    // object se toca por primera vez, MainActivity ya pidió el shell.
 
     private fun run(cmd: String): Result {
         val result = Shell.cmd(cmd).exec()
