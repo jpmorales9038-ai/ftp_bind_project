@@ -18,18 +18,27 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # El runner de ubuntu-latest trae el Android SDK preinstalado, pero
-      # sdkmanager no está en el PATH por defecto: lo buscamos dentro de
-      # cmdline-tools y lo usamos con ruta completa.
-      - name: Instalar paquetes del Android SDK
+      # Instalamos el Android SDK descargando el cmdline-tools oficial de
+      # Google directamente, en vez de depender de rutas preinstaladas del
+      # runner (que varían y no son confiables) o de la acción de terceros
+      # que instalaba el paquete legacy "tools" ya retirado.
+      - name: Descargar Android cmdline-tools
         run: |
-          ANDROID_SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          SDKMANAGER=$(find "$ANDROID_SDK_ROOT/cmdline-tools" -maxdepth 2 -name sdkmanager | sort -V | tail -1)
-          echo "Usando sdkmanager: $SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses > /dev/null
-          "$SDKMANAGER" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          export ANDROID_SDK_ROOT="$HOME/android-sdk"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          curl -sSL -o cmdline-tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
+          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Instalar paquetes del SDK y aceptar licencias
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
