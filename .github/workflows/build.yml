@@ -82,29 +82,60 @@ jobs:
 
       # Android no trae fusermount3 y rclone lo necesita para montar FUSE
       # (incluso corriendo como root: "fusermount3: executable file not
-      # found in $PATH"). fusermount3-static es un binario completamente
-      # estático (sin libc dinámica, sin dependencias) construido desde el
-      # libfuse oficial, así que corre igual en Android arm64 aunque no use
-      # Bionic. mount.sh ya agrega module/bin al PATH antes de invocar rclone.
-      - name: Descargar fusermount3 estático (linux-arm64)
+      # found in $PATH"). Antes se descargaba un binario ya compilado desde
+      # till0196/fusermount3-static, pero ese repo/release NO EXISTE (404
+      # persistente, no un cambio de tag), así que el build fallaba acá.
+      # En vez de depender de un tercero que puede desaparecer, lo
+      # compilamos nosotros: fuente oficial de libfuse + un cross-compiler
+      # musl, que produce un binario ELF arm64 sin dependencias dinámicas
+      # (no usa glibc en runtime), así que corre igual en Bionic/Android.
+      # mount.sh ya agrega module/bin al PATH antes de invocar rclone.
+      - name: Compilar fusermount3 estático (linux-arm64) desde libfuse
         run: |
-          # "-f" es la parte importante acá: sin ella, "curl -L" no falla
-          # ante un 404 (por ejemplo si cambia el nombre del asset o el tag)
-          # y termina guardando la página de error HTML como si fuera el
-          # binario. El build seguía verde y recién en el teléfono del
-          # usuario tronaba con "exec format error", que es justo lo que
-          # pasó: no era un binario real. Con "-f" el step falla acá mismo,
-          # con un motivo claro, en vez de empaquetar algo roto en silencio.
-          curl -fL -o module/bin/fusermount3 \
-            https://github.com/till0196/fusermount3-static/releases/download/v3.18.3/fusermount3-3.18.3-linux-arm64
+          set -e
+          FUSE_VERSION=3.16.2
+
+          # Cross-compiler musl para aarch64 (richfelker/musl-cross-make,
+          # hosteado en musl.cc). "-f" para que un 404 corte acá y no
+          # empaquete basura en silencio, igual que antes.
+          curl -fL -o musl-cross.tgz https://musl.cc/aarch64-linux-musl-cross.tgz
+          tar xf musl-cross.tgz
+          export PATH="$PWD/aarch64-linux-musl-cross/bin:$PATH"
+
+          curl -fL -o libfuse.tar.gz \
+            "https://github.com/libfuse/libfuse/releases/download/fuse-${FUSE_VERSION}/fuse-${FUSE_VERSION}.tar.gz"
+          tar xf libfuse.tar.gz
+          cd "fuse-${FUSE_VERSION}"
+
+          pip install --user --break-system-packages meson ninja
+          export PATH="$HOME/.local/bin:$PATH"
+
+          cat > cross.txt <<'EOF'
+          [binaries]
+          c = 'aarch64-linux-musl-gcc'
+          ar = 'aarch64-linux-musl-ar'
+          strip = 'aarch64-linux-musl-strip'
+          [host_machine]
+          system = 'linux'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          EOF
+
+          meson setup build --cross-file cross.txt \
+            -Dc_link_args=-static -Ddefault_library=static \
+            -Dutils=true -Dexamples=false -Dtests=false
+          ninja -C build util/fusermount3
+
+          cp build/util/fusermount3 ../module/bin/fusermount3
+          cd ..
           chmod +x module/bin/fusermount3
 
-          # Segunda red de seguridad: confirmar que lo descargado sea
-          # realmente un ELF ARM64 y no, por ejemplo, un HTML de error que
-          # curl haya aceptado igual por algún redirect raro.
+          # Segunda red de seguridad: confirmar que lo compilado sea
+          # realmente un ELF ARM64 estático.
           file module/bin/fusermount3
           file module/bin/fusermount3 | grep -q "ELF 64-bit.*ARM aarch64" || {
-            echo "::error::El archivo descargado no es un ELF ARM64 válido (¿cambió el asset/tag en till0196/fusermount3-static?)"
+            echo "::error::El binario compilado no es ELF ARM64 válido"
             exit 1
           }
 

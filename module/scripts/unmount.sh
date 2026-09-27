@@ -8,7 +8,7 @@ RCLONE_MOUNTPOINT="/data/local/tmp/rclone_ftp"
 TARGET_PATH="/sdcard/FTP"
 
 umount -l "$TARGET_PATH" 2>>"$LOG_FILE"
-umount -l "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || fusermount -u "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE"
+umount -l "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || "$MODDIR/bin/fusermount3" -u "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE"
 
 # Por si el mount corre como proceso en background
 pkill -f "rclone mount remote" 2>/dev/null
