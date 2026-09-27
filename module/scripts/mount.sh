@@ -1,5 +1,19 @@
 #!/system/bin/sh
-MODDIR=$(dirname "$(dirname "$(readlink -f "$0")")")
+SELF="$(readlink -f "$0")"
+MODDIR=$(dirname "$(dirname "$SELF")")
+
+# Si esto corre desde el "su" de la app (RootShell -> libsu) o desde
+# ciertos service.sh, el proceso puede quedar en un mount namespace
+# PRIVADO en vez del namespace global (el de init/PID 1). El mount y el
+# bind se hacen igual y rclone loguea éxito ("Montado correctamente"),
+# pero el bind solo existe en ese namespace aislado — ningún otro
+# proceso del sistema (explorador de archivos incluido) lo ve. Por eso
+# "dice que monta pero no aparecen los archivos". Forzamos re-ejecutar
+# este script ya adentro del namespace de PID 1 para que el mount se
+# propague a todo el sistema.
+if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
+    exec nsenter -t 1 -m -- sh "$SELF" "$@"
+fi
 
 RCLONE_BIN="$MODDIR/bin/rclone"
 RCLONE_CONF="$MODDIR/config/rclone.conf"

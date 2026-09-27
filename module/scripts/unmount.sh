@@ -1,5 +1,12 @@
 #!/system/bin/sh
-MODDIR=$(dirname "$(dirname "$(readlink -f "$0")")")
+SELF="$(readlink -f "$0")"
+MODDIR=$(dirname "$(dirname "$SELF")")
+
+# Mismo motivo que en mount.sh: forzar el namespace global de PID 1 para
+# que el umount le pegue al mount real, no a una vista privada del proceso.
+if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
+    exec nsenter -t 1 -m -- sh "$SELF" "$@"
+fi
 
 LOG_FILE="$MODDIR/mount.log"
 STATUS_FILE="$MODDIR/status.json"
