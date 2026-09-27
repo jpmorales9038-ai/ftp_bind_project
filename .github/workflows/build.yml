@@ -97,7 +97,7 @@ jobs:
           path: rclone-ftp-bind-module.zip
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push'
     needs: [ build-app, package-module ]
     runs-on: ubuntu-latest
     permissions:
@@ -107,9 +107,15 @@ jobs:
         with:
           path: dist
 
-      - name: Crear release en GitHub
+      # Release fija con tag "latest": cada push exitoso a main la
+      # sobrescribe (mismos assets, un solo release siempre vigente), sin
+      # necesidad de crear tags manualmente.
+      - name: Publicar/actualizar release "latest"
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/app-debug-apk/*.apk
-            dist/rclone-ftp-bind-module/*.zip
+          tag_name: latest
+          name: "Build automático"
+          body: |
+            Build generado automáticamente desde el commit ${{ github.sha }}.
+          make_latest: true
+          files: dist/rclone-ftp-bind-module/*.zip
