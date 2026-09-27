@@ -18,15 +18,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # El runner de ubuntu-latest ya trae el Android SDK preinstalado
-      # (ANDROID_HOME + sdkmanager en PATH). Solo instalamos los paquetes
-      # que hacen falta; evitamos android-actions/setup-android porque
-      # intenta instalar el paquete legacy "tools", que Google ya retiró
-      # del repositorio y hace fallar el step.
+      # El runner de ubuntu-latest trae el Android SDK preinstalado, pero
+      # sdkmanager no está en el PATH por defecto: lo buscamos dentro de
+      # cmdline-tools y lo usamos con ruta completa.
       - name: Instalar paquetes del Android SDK
         run: |
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          ANDROID_SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER=$(find "$ANDROID_SDK_ROOT/cmdline-tools" -maxdepth 2 -name sdkmanager | sort -V | tail -1)
+          echo "Usando sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
