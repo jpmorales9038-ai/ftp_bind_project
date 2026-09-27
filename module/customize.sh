@@ -6,6 +6,7 @@ mkdir -p "$MODPATH/config"
 mkdir -p "$MODPATH/scripts"
 
 chmod 755 "$MODPATH/bin/rclone"
+chmod 755 "$MODPATH/bin/fusermount3" 2>/dev/null
 chmod 755 "$MODPATH/scripts/"*.sh
 chmod 755 "$MODPATH/service.sh"
 chmod 755 "$MODPATH/post-fs-data.sh"

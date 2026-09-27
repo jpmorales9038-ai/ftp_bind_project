@@ -46,7 +46,21 @@ class BindViewModel : ViewModel() {
     }
 
     fun saveFtpConfig(host: String, port: String, user: String, pass: String) = viewModelScope.launch {
-        val result = withContext(Dispatchers.IO) { RootShell.saveConfig(host, port, user, pass) }
+        // Es muy fácil pegar la dirección completa ("ftp://192.168.1.75") en
+        // el campo Host — pero rclone espera ahí solo el host/IP, sin
+        // esquema ni ruta, y si le llega con "ftp://" arma una dirección con
+        // colones de más ("ftp://192.168.1.75:2121") que el resolver de red
+        // rechaza con "too many colons in address". Se limpia acá antes de
+        // guardar para que ese error no vuelva a aparecer.
+        val cleanHost = host
+            .trim()
+            .removePrefix("ftp://")
+            .removePrefix("ftps://")
+            .removePrefix("http://")
+            .removePrefix("https://")
+            .substringBefore("/")
+            .substringBefore(":") // por si el usuario ya incluyó el puerto acá
+        val result = withContext(Dispatchers.IO) { RootShell.saveConfig(cleanHost, port, user, pass) }
         lastMessage = if (result.success) "Configuración guardada" else "Error al guardar: ${result.output.take(200)}"
     }
 

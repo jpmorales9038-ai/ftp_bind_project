@@ -5,11 +5,26 @@ RCLONE_BIN="$MODDIR/bin/rclone"
 RCLONE_CONF="$MODDIR/config/rclone.conf"
 LOG_FILE="$MODDIR/mount.log"
 STATUS_FILE="$MODDIR/status.json"
+CACHE_DIR="$MODDIR/cache"
 
 # Punto donde rclone monta realmente el FTP
 RCLONE_MOUNTPOINT="/data/local/tmp/rclone_ftp"
 # Ruta final visible en el almacenamiento interno (bind)
 TARGET_PATH="/sdcard/FTP"
+
+# Al correr como root vía su/servicio, $HOME suele venir vacío o en "/", y
+# rclone intenta entonces crear su vfs cache en "/.cache" — que cae en la
+# partición de sistema, de solo lectura ("mkdir /.cache: read-only file
+# system"). Fijamos HOME a un directorio propio y escribible del módulo, y
+# además pasamos --cache-dir explícito para no depender de HOME en absoluto.
+export HOME="$MODDIR"
+mkdir -p "$CACHE_DIR"
+
+# Android no trae fusermount3 (rclone lo necesita para montar FUSE incluso
+# corriendo como root: "fusermount3: executable file not found in $PATH").
+# Se agrega $MODDIR/bin (donde va el binario que empaqueta el módulo) al
+# PATH para que rclone lo encuentre.
+export PATH="$MODDIR/bin:$PATH"
 
 if [ ! -f "$RCLONE_CONF" ]; then
     echo "$(date): No hay rclone.conf, configura el FTP desde la app" >> "$LOG_FILE"
@@ -27,6 +42,7 @@ fi
 
 "$RCLONE_BIN" mount remote: "$RCLONE_MOUNTPOINT" \
     --config "$RCLONE_CONF" \
+    --cache-dir "$CACHE_DIR" \
     --allow-other \
     --vfs-cache-mode writes \
     --daemon \

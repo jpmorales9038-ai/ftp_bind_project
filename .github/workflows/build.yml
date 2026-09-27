@@ -80,6 +80,18 @@ jobs:
           cp rclone_extracted/*/rclone module/bin/rclone
           chmod +x module/bin/rclone
 
+      # Android no trae fusermount3 y rclone lo necesita para montar FUSE
+      # (incluso corriendo como root: "fusermount3: executable file not
+      # found in $PATH"). fusermount3-static es un binario completamente
+      # estático (sin libc dinámica, sin dependencias) construido desde el
+      # libfuse oficial, así que corre igual en Android arm64 aunque no use
+      # Bionic. mount.sh ya agrega module/bin al PATH antes de invocar rclone.
+      - name: Descargar fusermount3 estático (linux-arm64)
+        run: |
+          curl -L -o module/bin/fusermount3 \
+            https://github.com/till0196/fusermount3-static/releases/download/v3.18.3/fusermount3-3.18.3-linux-arm64
+          chmod +x module/bin/fusermount3
+
       # El APK va DENTRO del módulo (module/app.apk) para que customize.sh
       # lo instale/actualice solo al flashear el módulo desde el Manager.
       - name: Copiar APK dentro del módulo
