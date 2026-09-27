@@ -46,15 +46,7 @@ class BindViewModel : ViewModel() {
     }
 
     fun saveFtpConfig(host: String, port: String, user: String, pass: String) = viewModelScope.launch {
-        val conf = """
-            [remote]
-            type = ftp
-            host = $host
-            port = $port
-            user = $user
-            pass = $pass
-        """.trimIndent()
-        val result = withContext(Dispatchers.IO) { RootShell.saveConfig(conf) }
+        val result = withContext(Dispatchers.IO) { RootShell.saveConfig(host, port, user, pass) }
         lastMessage = if (result.success) "Configuración guardada" else "Error al guardar: ${result.output.take(200)}"
     }
 

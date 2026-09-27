@@ -8,6 +8,7 @@ import com.topjohnwu.superuser.Shell
 object ModulePaths {
     const val MODULE_ID = "rclone_ftp_bind"
     const val BASE = "/data/adb/modules/$MODULE_ID"
+    const val BIN = "$BASE/bin/rclone"
     const val SCRIPTS = "$BASE/scripts"
     const val CONFIG_DIR = "$BASE/config"
     const val RCLONE_CONF = "$CONFIG_DIR/rclone.conf"
@@ -27,6 +28,8 @@ object RootShell {
     // después de que el shell principal ya se creó, y para cuando este
     // object se toca por primera vez, MainActivity ya pidió el shell.
 
+    private fun sq(s: String) = "'" + s.replace("'", "'\\''") + "'"
+
     private fun run(cmd: String): Result {
         val result = Shell.cmd(cmd).exec()
         return Result(result.isSuccess, result.out.joinToString("\n"))
@@ -40,9 +43,35 @@ object RootShell {
 
     fun tailLog(lines: Int = 200): Result = run("tail -n $lines ${ModulePaths.LOG_FILE} 2>/dev/null")
 
-    fun saveConfig(rcloneConfContent: String): Result {
-        val escaped = rcloneConfContent.replace("'", "'\\''")
-        return run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' '$escaped' > ${ModulePaths.RCLONE_CONF}")
+    fun saveConfig(host: String, port: String, user: String, pass: String): Result {
+        // rclone guarda las contraseñas "ofuscadas" (un XOR+base64 reversible,
+        // no un cifrado real) y al montar intenta des-ofuscar el valor de
+        // "pass" del config asumiendo que ya viene así. Si se escribe la
+        // contraseña en texto plano, rclone falla con "NewFS decrypt
+        // password: input too short when revealing password" porque intenta
+        // revertir una ofuscación que nunca se aplicó — es justo el error
+        // que se veía en los logs. Por eso hay que pasarla primero por
+        // "rclone obscure" y guardar ese resultado, nunca el texto plano.
+        val quotedPass = sq(pass)
+        val obscure = Shell.cmd("${ModulePaths.BIN} obscure $quotedPass").exec()
+        if (!obscure.isSuccess) {
+            return Result(false, "No se pudo ofuscar la contraseña: " + obscure.out.joinToString("\n"))
+        }
+        val obscuredPass = obscure.out.joinToString("").trim()
+        if (obscuredPass.isEmpty()) {
+            return Result(false, "rclone obscure devolvió un valor vacío")
+        }
+
+        val conf = """
+            [remote]
+            type = ftp
+            host = $host
+            port = $port
+            user = $user
+            pass = $obscuredPass
+        """.trimIndent()
+        val escaped = conf.replace("'", "'\\''")
+        return run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s\n' '$escaped' > ${ModulePaths.RCLONE_CONF}")
     }
 
     fun setAutostart(enabled: Boolean): Result =

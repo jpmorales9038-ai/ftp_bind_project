@@ -112,6 +112,13 @@ jobs:
       # necesidad de crear tags manualmente.
       - name: Publicar/actualizar release "latest"
         uses: softprops/action-gh-release@v2
+        env:
+          # La acción lee el token de esta variable de entorno; sin ella
+          # falla la autenticación contra la API y el release nunca se
+          # crea/actualiza (con permissions.contents:write solo se le da
+          # permiso de escritura al token por default, pero hay que
+          # pasárselo explícitamente igual).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: latest
           name: "Build automático"

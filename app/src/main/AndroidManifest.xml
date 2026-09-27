@@ -5,7 +5,8 @@
         android:name=".RCloneApp"
         android:allowBackup="true"
         android:label="RClone FTP Bind"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:testOnly="false">
 
         <activity
             android:name=".MainActivity"
