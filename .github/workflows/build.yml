@@ -95,12 +95,14 @@ jobs:
           set -e
           FUSE_VERSION=3.16.2
 
-          # Cross-compiler musl para aarch64 (richfelker/musl-cross-make,
-          # hosteado en musl.cc). "-f" para que un 404 corte acá y no
-          # empaquete basura en silencio, igual que antes.
-          curl -fL -o musl-cross.tgz https://musl.cc/aarch64-linux-musl-cross.tgz
-          tar xf musl-cross.tgz
-          export PATH="$PWD/aarch64-linux-musl-cross/bin:$PATH"
+          # Cross-compiler para aarch64 desde los repos oficiales de Ubuntu
+          # (no depende de ningún host de terceros como musl.cc, que se
+          # cayó en el intento anterior: "Failed to connect to musl.cc").
+          # libc6-dev-arm64-cross trae libc.a, así que igual podemos linkear
+          # totalmente estático con "-static" y no depender de la libc
+          # dinámica del dispositivo (Bionic) en runtime.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
           curl -fL -o libfuse.tar.gz \
             "https://github.com/libfuse/libfuse/releases/download/fuse-${FUSE_VERSION}/fuse-${FUSE_VERSION}.tar.gz"
@@ -112,9 +114,9 @@ jobs:
 
           cat > cross.txt <<'EOF'
           [binaries]
-          c = 'aarch64-linux-musl-gcc'
-          ar = 'aarch64-linux-musl-ar'
-          strip = 'aarch64-linux-musl-strip'
+          c = 'aarch64-linux-gnu-gcc'
+          ar = 'aarch64-linux-gnu-ar'
+          strip = 'aarch64-linux-gnu-strip'
           [host_machine]
           system = 'linux'
           cpu_family = 'aarch64'
