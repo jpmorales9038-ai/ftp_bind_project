@@ -12,11 +12,19 @@ module/    Módulo KernelSU (scripts de montaje + binario rclone)
 
 ## Cómo funciona
 
-1. La app guarda las credenciales FTP en `module/config/rclone.conf` (vía root).
-2. `scripts/mount.sh` monta el remoto con `rclone mount --daemon` en un punto
+1. El zip del módulo trae el APK embebido (`module/app.apk`). Al flashear
+   el módulo desde el Manager de KernelSU (con el sistema arrancado),
+   `customize.sh` corre `pm install -r` automáticamente: instala la app la
+   primera vez y la **actualiza sin perder datos** en cada reflasheo, ya
+   que `-r` sobrescribe la instalación existente conservando su config.
+   Si el módulo se flashea desde recovery (sistema no arrancado), no hay
+   `pm` disponible y el script solo avisa dónde quedó el APK para
+   instalarlo a mano.
+2. La app guarda las credenciales FTP en `module/config/rclone.conf` (vía root).
+3. `scripts/mount.sh` monta el remoto con `rclone mount --daemon` en un punto
    temporal y luego hace `mount --bind` hacia `/sdcard/FTP`.
-3. `scripts/unmount.sh` revierte ambos montajes.
-4. `service.sh` remonta automáticamente al boot si el usuario activó
+4. `scripts/unmount.sh` revierte ambos montajes.
+5. `service.sh` remonta automáticamente al boot si el usuario activó
    "Montar al iniciar" desde la app.
 
 ## Requisitos

@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
 
@@ -61,9 +62,16 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
 
   package-module:
+    needs: build-app
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Descargar APK ya compilado
+        uses: actions/download-artifact@v4
+        with:
+          name: app-debug-apk
+          path: apk
 
       - name: Descargar binario de rclone (linux-arm64)
         run: |
@@ -71,6 +79,11 @@ jobs:
           unzip -q rclone.zip -d rclone_extracted
           cp rclone_extracted/*/rclone module/bin/rclone
           chmod +x module/bin/rclone
+
+      # El APK va DENTRO del módulo (module/app.apk) para que customize.sh
+      # lo instale/actualice solo al flashear el módulo desde el Manager.
+      - name: Copiar APK dentro del módulo
+        run: cp apk/*.apk module/app.apk
 
       - name: Empaquetar módulo KernelSU
         run: |
