@@ -10,6 +10,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // libsu (topjohnwu) se publica en JitPack, no en Maven Central
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
