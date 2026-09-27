@@ -7,6 +7,24 @@ android {
     namespace = "com.rclonebind.app"
     compileSdk = 34
 
+    // Gradle usa por defecto "~/.android/debug.keystore", que se
+    // autogenera con una clave AL AZAR la primera vez que se necesita en
+    // cada máquina. En GitHub Actions eso significa una clave nueva en
+    // CADA build, así que cada APK queda firmado distinto y Android
+    // rechaza instalar la actualización sobre la anterior a menos que se
+    // desinstale primero ("no me deja instalar sobre la anterior sin
+    // desinstalar" = INSTALL_FAILED_UPDATE_INCOMPATIBLE / conflicto de
+    // firma). Usando este keystore versionado en el repo, todos los
+    // builds (locales o en CI) firman siempre con la misma clave.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("../debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.rclonebind.app"
         minSdk = 26
