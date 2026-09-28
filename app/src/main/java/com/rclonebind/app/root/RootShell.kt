@@ -265,6 +265,20 @@ object RootShell {
     fun setAutostart(enabled: Boolean): Result =
         run("mkdir -p ${ModulePaths.CONFIG_DIR} && echo '${if (enabled) "1" else "0"}' > ${ModulePaths.CONFIG_DIR}/autostart")
 
+    // ---- Caché en disco de rclone ----
+
+    /** Tamaño actual de la caché en KB, para mostrarlo en la UI. */
+    fun cacheSizeKb(): Long =
+        Shell.cmd("du -sk ${ModulePaths.BASE}/cache 2>/dev/null | cut -f1").exec().out
+            .firstOrNull()?.trim()?.toLongOrNull() ?: 0L
+
+    /**
+     * Borra la caché en disco (scripts/clear_cache.sh). Solo tiene efecto
+     * con el bind desmontado: si sigue montado, el script se niega para no
+     * perder escrituras pendientes y Result.output empieza con "ERROR".
+     */
+    fun clearCache(): Result = run("sh ${ModulePaths.SCRIPTS}/clear_cache.sh")
+
     /** Subcarpetas (sin ocultas) de [path], ordenadas. Se lista con root para no depender de permisos de almacenamiento. */
     fun listDirs(path: String): List<String> =
         Shell.cmd("ls -1p ${sq(path)} 2>/dev/null").exec().out

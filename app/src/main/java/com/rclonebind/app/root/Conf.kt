@@ -19,6 +19,13 @@ const val CACHE_GB_MAX = 50
 /** Tamaño de caché que usa mount.sh cuando el usuario no eligió uno (debe coincidir con el script). */
 fun defaultCacheGb(mode: PerfMode): Int = if (mode == PerfMode.MAX) 10 else 1
 
+/** KB a un texto legible ("340 MB", "2.3 GB"), para mostrar el tamaño de la caché en disco. */
+fun formatCacheKb(kb: Long): String = when {
+    kb >= 1_048_576 -> "%.1f GB".format(kb / 1_048_576.0)
+    kb >= 1024 -> "%.0f MB".format(kb / 1024.0)
+    else -> "$kb KB"
+}
+
 /** Ajustes propios de un remoto Google Drive. El token nunca sale del rclone.conf. */
 data class DriveOptions(
     val clientId: String = "",

@@ -8,6 +8,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -29,9 +32,13 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.filled.AccountBox
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.outlined.AccountBox
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -48,6 +55,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -90,11 +98,17 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private sealed class Screen(val label: String, val icon: ImageVector) {
-    object Home : Screen("Inicio", Icons.Default.Home)
-    object Servers : Screen("Servidores", Icons.Default.AccountBox)
-    object Logs : Screen("Logs", Icons.AutoMirrored.Filled.List)
-    object About : Screen("Acerca de", Icons.Default.Info)
+/**
+ * Cada pestaña trae un ícono en trazo (sin seleccionar) y uno relleno
+ * (seleccionada) — el intercambio outlined/filled es el lenguaje que
+ * Material Expressive usa en sus barras de navegación en vez de solo
+ * cambiar de color.
+ */
+private sealed class Screen(val label: String, val filledIcon: ImageVector, val outlinedIcon: ImageVector) {
+    object Home : Screen("Inicio", Icons.Filled.Home, Icons.Outlined.Home)
+    object Servers : Screen("Servidores", Icons.Filled.AccountBox, Icons.Outlined.AccountBox)
+    object Logs : Screen("Logs", Icons.AutoMirrored.Filled.List, Icons.AutoMirrored.Outlined.List)
+    object About : Screen("Acerca de", Icons.Filled.Info, Icons.Outlined.Info)
 }
 
 /** Alto de la píldora (52 + 2×8 de relleno) + separación por arriba y abajo. */
@@ -239,6 +253,13 @@ private fun PillItem(screen: Screen, selected: Boolean, onClick: () -> Unit) {
     val content by animateColorAsState(
         if (selected) colors.onPrimary else colors.onPrimaryContainer, label = "pillContent"
     )
+    // Rebote elástico al seleccionar, en vez de un simple fundido: es el
+    // toque de motion que distingue a Expressive de un cambio de color liso.
+    val iconScale by animateFloatAsState(
+        if (selected) 1f else 0.86f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "pillIconScale"
+    )
 
     Row(
         modifier = Modifier
@@ -251,7 +272,12 @@ private fun PillItem(screen: Screen, selected: Boolean, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(screen.icon, contentDescription = screen.label, tint = content)
+        Icon(
+            imageVector = if (selected) screen.filledIcon else screen.outlinedIcon,
+            contentDescription = screen.label,
+            tint = content,
+            modifier = Modifier.scale(iconScale)
+        )
         AnimatedVisibility(
             visible = selected,
             enter = fadeIn() + expandHorizontally(),

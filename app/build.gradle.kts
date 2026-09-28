@@ -72,6 +72,9 @@ dependencies {
     // Compose 1.12 alpha, que exige compileSdk 37 y AGP 9.1.
     implementation("androidx.compose.material3:material3:1.5.0-alpha18")
     implementation("androidx.compose.material:material-icons-core")
+    // Variantes "outlined" de los íconos de la píldora inferior (estilo
+    // Material Expressive: trazo sin seleccionar, relleno al seleccionar).
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.9.0")
     // Desenfoque del fondo (backdrop blur) de la barra inferior tipo píldora
     implementation("dev.chrisbanes.haze:haze:1.6.10")

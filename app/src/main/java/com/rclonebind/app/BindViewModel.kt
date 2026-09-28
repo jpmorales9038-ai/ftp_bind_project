@@ -17,6 +17,7 @@ import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RootShell
 import com.rclonebind.app.root.cleanHost
 import com.rclonebind.app.root.cleanTargetPath
+import com.rclonebind.app.root.formatCacheKb
 import com.rclonebind.app.root.validateTargetPath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,7 +34,8 @@ private class Snapshot(
     val autostart: Boolean,
     val targetPath: String,
     val perfMode: PerfMode,
-    val cacheGb: Int?
+    val cacheGb: Int?,
+    val cacheKb: Long
 )
 
 class BindViewModel : ViewModel() {
@@ -59,6 +61,9 @@ class BindViewModel : ViewModel() {
         private set
     /** Tamaño de caché elegido en GB; null = el que trae el perfil. */
     var cacheGb by mutableStateOf<Int?>(null)
+        private set
+    /** Tamaño actual de la caché en disco (KB), para mostrarlo junto al botón de borrarla. */
+    var cacheKb by mutableStateOf(0L)
         private set
     /** Servidor seleccionado: el que usa el botón Montar. */
     var activeName by mutableStateOf<String?>(null)
@@ -118,7 +123,8 @@ class BindViewModel : ViewModel() {
                 autostart = RootShell.readAutostart(),
                 targetPath = RootShell.readTargetPath(),
                 perfMode = RootShell.readPerfMode(),
-                cacheGb = RootShell.readCacheGb()
+                cacheGb = RootShell.readCacheGb(),
+                cacheKb = RootShell.cacheSizeKb()
             )
         }
 
@@ -138,6 +144,7 @@ class BindViewModel : ViewModel() {
         targetPath = snap.targetPath
         perfMode = snap.perfMode
         cacheGb = snap.cacheGb
+        cacheKb = snap.cacheKb
         isMounted = snap.status.contains("\"mounted\":true")
         mountedRemote = if (isMounted) {
             Regex("\"remote\":\"([^\"]*)\"").find(snap.status)?.groupValues?.get(1)
@@ -393,6 +400,25 @@ class BindViewModel : ViewModel() {
     fun clearLogs() {
         logs = ""
         viewModelScope.launch { withContext(Dispatchers.IO) { RootShell.clearLog() } }
+    }
+
+    /** Borra la caché en disco de rclone. Requiere tener el bind desmontado (ver clear_cache.sh). */
+    fun clearCache() = viewModelScope.launch {
+        if (isMounted) {
+            message = "Desmonta primero para borrar la caché"
+            return@launch
+        }
+        if (busy) return@launch
+        busy = true
+        val result = withContext(Dispatchers.IO) { RootShell.clearCache() }
+        busy = false
+        message = if (result.success) {
+            val kb = result.output.trim().removePrefix("OK").trim().toLongOrNull() ?: 0L
+            cacheKb = 0L
+            if (kb > 0) "Caché borrada (liberados ${formatCacheKb(kb)})" else "No había nada en caché"
+        } else {
+            "No se pudo borrar la caché: ${result.output.take(200)}"
+        }
     }
 
     private companion object {

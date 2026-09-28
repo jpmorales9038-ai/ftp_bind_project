@@ -18,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
@@ -42,6 +43,7 @@ import com.rclonebind.app.root.CACHE_GB_MAX
 import com.rclonebind.app.root.CACHE_GB_MIN
 import com.rclonebind.app.root.PerfMode
 import com.rclonebind.app.root.defaultCacheGb
+import com.rclonebind.app.root.formatCacheKb
 import com.rclonebind.app.ui.components.FolderPickerDialog
 import com.rclonebind.app.ui.components.OptionTile
 import com.rclonebind.app.ui.components.PerfTestSheet
@@ -204,7 +206,8 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
         SectionCard(
             title = "Rendimiento",
             icon = AppIcons.Bolt,
-            subtitle = "Máximo guarda más en caché para leer y escribir más rápido, a costa de espacio en disco. Se aplica al volver a montar."
+            subtitle = "Máximo guarda más en caché para leer y escribir más rápido, a costa de espacio en disco. Se aplica al volver a montar.",
+            expandable = true
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -263,6 +266,30 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                 Icon(AppIcons.Bolt, contentDescription = null)
                 Spacer(Modifier.width(10.dp))
                 Text("Probar rendimiento", style = MaterialTheme.typography.titleMedium)
+            }
+
+            HorizontalDivider()
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Caché en disco", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (mounted) {
+                            "${formatCacheKb(vm.cacheKb)} usados · desmonta para borrarla"
+                        } else {
+                            "${formatCacheKb(vm.cacheKb)} usados"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant
+                    )
+                }
+                TextButton(onClick = { vm.clearCache() }, enabled = !mounted && !vm.busy) {
+                    Text("Borrar caché")
+                }
             }
         }
     }
