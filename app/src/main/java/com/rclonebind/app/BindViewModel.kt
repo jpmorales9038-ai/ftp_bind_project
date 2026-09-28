@@ -10,6 +10,7 @@ import com.rclonebind.app.root.DEFAULT_TARGET_PATH
 import com.rclonebind.app.root.DriveAuthParser
 import com.rclonebind.app.root.DriveAuthState
 import com.rclonebind.app.root.DriveOptions
+import com.rclonebind.app.root.PerfMode
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RootShell
 import com.rclonebind.app.root.cleanHost
@@ -28,7 +29,9 @@ private class Snapshot(
     val active: String?,
     val status: String,
     val autostart: Boolean,
-    val targetPath: String
+    val targetPath: String,
+    val perfMode: PerfMode,
+    val cacheGb: Int?
 )
 
 class BindViewModel : ViewModel() {
@@ -48,6 +51,12 @@ class BindViewModel : ViewModel() {
         private set
     /** Ruta donde queda visible el bind (editable desde Inicio). */
     var targetPath by mutableStateOf(DEFAULT_TARGET_PATH)
+        private set
+    /** Perfil de rendimiento del montaje (Equilibrado o Máximo). */
+    var perfMode by mutableStateOf(PerfMode.BALANCED)
+        private set
+    /** Tamaño de caché elegido en GB; null = el que trae el perfil. */
+    var cacheGb by mutableStateOf<Int?>(null)
         private set
     /** Servidor seleccionado: el que usa el botón Montar. */
     var activeName by mutableStateOf<String?>(null)
@@ -102,7 +111,9 @@ class BindViewModel : ViewModel() {
                 active = RootShell.readActive(),
                 status = RootShell.status().output,
                 autostart = RootShell.readAutostart(),
-                targetPath = RootShell.readTargetPath()
+                targetPath = RootShell.readTargetPath(),
+                perfMode = RootShell.readPerfMode(),
+                cacheGb = RootShell.readCacheGb()
             )
         }
 
@@ -120,6 +131,8 @@ class BindViewModel : ViewModel() {
         activeName = active
         autostart = snap.autostart
         targetPath = snap.targetPath
+        perfMode = snap.perfMode
+        cacheGb = snap.cacheGb
         isMounted = snap.status.contains("\"mounted\":true")
         mountedRemote = if (isMounted) {
             Regex("\"remote\":\"([^\"]*)\"").find(snap.status)?.groupValues?.get(1)
@@ -288,6 +301,27 @@ class BindViewModel : ViewModel() {
             message = if (isMounted) "Ruta guardada. Vuelve a montar para aplicarla." else "Ruta guardada"
         } else {
             message = "Error al guardar la ruta: ${result.output.take(200)}"
+        }
+    }
+
+    fun setPerfMode(mode: PerfMode) = viewModelScope.launch {
+        perfMode = mode
+        val result = withContext(Dispatchers.IO) { RootShell.setPerfMode(mode) }
+        message = when {
+            !result.success -> "Error al guardar: ${result.output.take(200)}"
+            isMounted -> "Guardado. Vuelve a montar para aplicarlo."
+            else -> null
+        }
+    }
+
+    /** [gb] null restablece el tamaño del perfil. */
+    fun setCacheGb(gb: Int?) = viewModelScope.launch {
+        cacheGb = gb
+        val result = withContext(Dispatchers.IO) { RootShell.setCacheGb(gb) }
+        message = when {
+            !result.success -> "Error al guardar: ${result.output.take(200)}"
+            isMounted -> "Guardado. Vuelve a montar para aplicarlo."
+            else -> null
         }
     }
 

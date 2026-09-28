@@ -6,6 +6,19 @@ enum class RemoteType(val rclone: String, val label: String) {
     DRIVE("drive", "Google Drive")
 }
 
+/** Perfil de rendimiento del montaje (lo lee scripts/mount.sh desde config/perf). */
+enum class PerfMode(val id: String, val label: String) {
+    BALANCED("balanced", "Equilibrado"),
+    MAX("max", "Máximo")
+}
+
+/** Rango del tamaño de caché en GB que ofrece la app. */
+const val CACHE_GB_MIN = 1
+const val CACHE_GB_MAX = 50
+
+/** Tamaño de caché que usa mount.sh cuando el usuario no eligió uno (debe coincidir con el script). */
+fun defaultCacheGb(mode: PerfMode): Int = if (mode == PerfMode.MAX) 10 else 1
+
 /** Ajustes propios de un remoto Google Drive. El token nunca sale del rclone.conf. */
 data class DriveOptions(
     val clientId: String = "",

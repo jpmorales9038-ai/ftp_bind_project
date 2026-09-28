@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -18,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -33,10 +35,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
 import com.rclonebind.app.ui.components.AppIcons
+import com.rclonebind.app.root.CACHE_GB_MAX
+import com.rclonebind.app.root.CACHE_GB_MIN
+import com.rclonebind.app.root.PerfMode
+import com.rclonebind.app.root.defaultCacheGb
 import com.rclonebind.app.ui.components.FolderPickerDialog
+import com.rclonebind.app.ui.components.OptionTile
 import com.rclonebind.app.ui.components.ScreenContainer
 import com.rclonebind.app.ui.components.SectionCard
 import com.rclonebind.app.ui.theme.AppMotion
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -185,6 +193,58 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                     )
                     TextButton(onClick = { showPathDialog = true }) { Text("Cambiar") }
                 }
+            }
+        }
+
+        SectionCard(
+            title = "Rendimiento",
+            icon = AppIcons.Bolt,
+            subtitle = "Máximo guarda más en caché para leer y escribir más rápido, a costa de espacio en disco. Se aplica al volver a montar."
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                PerfMode.entries.forEach { mode ->
+                    OptionTile(
+                        label = mode.label,
+                        icon = if (mode == PerfMode.MAX) AppIcons.Bolt else Icons.Default.Settings,
+                        selected = vm.perfMode == mode,
+                        onClick = { vm.setPerfMode(mode) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            val custom = vm.cacheGb
+            val effective = custom ?: defaultCacheGb(vm.perfMode)
+            var draft by remember(effective) { mutableStateOf(effective.toFloat()) }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Tamaño de caché", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "${draft.roundToInt()} GB" + if (custom == null) " (auto)" else "",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = scheme.primary
+                )
+            }
+            Slider(
+                value = draft,
+                onValueChange = { draft = it },
+                onValueChangeFinished = { vm.setCacheGb(draft.roundToInt()) },
+                valueRange = CACHE_GB_MIN.toFloat()..CACHE_GB_MAX.toFloat(),
+                steps = CACHE_GB_MAX - CACHE_GB_MIN - 1
+            )
+            Text(
+                "Aplica a Google Drive y a FTP en modo Máximo. En Máximo se dejan 2 GB libres para no llenar el almacenamiento.",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant
+            )
+            if (custom != null) {
+                TextButton(onClick = { vm.setCacheGb(null) }) { Text("Restablecer tamaño automático") }
             }
         }
     }

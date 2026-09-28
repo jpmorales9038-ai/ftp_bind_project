@@ -92,6 +92,7 @@ sequenceDiagram
 - Un **vigilante** restaura el bind si Android o alguna app lo quita.
 - Cambiar de servidor con uno ya montado se hace con un solo botón.
 - Caché de disco acotada para Drive.
+- **Rendimiento** Equilibrado o Máximo: el modo Máximo usa caché completa también en FTP, lectura anticipada, descargas en paralelo y listados cacheados más tiempo. El **tamaño de caché** es configurable (1 a 50 GB) y se dejan 2 GB libres.
 
 ### Instalación y actualizaciones sin fricción
 

@@ -14,6 +14,8 @@ object ModulePaths {
     const val RCLONE_CONF = "$CONFIG_DIR/rclone.conf"
     const val ACTIVE_FILE = "$CONFIG_DIR/active"
     const val TARGET_PATH_FILE = "$CONFIG_DIR/target_path"
+    const val PERF_FILE = "$CONFIG_DIR/perf"
+    const val CACHE_GB_FILE = "$CONFIG_DIR/cache_gb"
     const val STATUS_FILE = "$BASE/status.json"
     const val LOG_FILE = "$BASE/mount.log"
     /** Salida temporal de `rclone authorize` (contiene el token: se borra al terminar). */
@@ -218,6 +220,24 @@ object RootShell {
 
     fun setTargetPath(path: String): Result =
         run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(path)} > ${ModulePaths.TARGET_PATH_FILE}")
+
+    fun readPerfMode(): PerfMode {
+        val v = Shell.cmd("cat ${ModulePaths.PERF_FILE} 2>/dev/null").exec().out.joinToString("").trim()
+        return PerfMode.entries.firstOrNull { it.id == v } ?: PerfMode.BALANCED
+    }
+
+    fun setPerfMode(mode: PerfMode): Result =
+        run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(mode.id)} > ${ModulePaths.PERF_FILE}")
+
+    /** Tamaño de caché elegido (GB), o null si se usa el del perfil. */
+    fun readCacheGb(): Int? =
+        Shell.cmd("cat ${ModulePaths.CACHE_GB_FILE} 2>/dev/null").exec().out
+            .joinToString("").trim().toIntOrNull()?.takeIf { it in CACHE_GB_MIN..CACHE_GB_MAX }
+
+    /** Con [gb] null se borra el ajuste y vuelve al tamaño del perfil. */
+    fun setCacheGb(gb: Int?): Result =
+        if (gb == null) run("rm -f ${ModulePaths.CACHE_GB_FILE}")
+        else run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' $gb > ${ModulePaths.CACHE_GB_FILE}")
 
     fun readAutostart(): Boolean =
         Shell.cmd("cat ${ModulePaths.CONFIG_DIR}/autostart 2>/dev/null").exec().out
