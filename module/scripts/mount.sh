@@ -57,28 +57,59 @@ if ! grep -qxF "[$ACTIVE]" "$RCLONE_CONF"; then
 fi
 
 mkdir -p "$RCLONE_MOUNTPOINT"
-mkdir -p "$TARGET_PATH"
-
 # Estado actual: el montaje FUSE de rclone y el bind sobre /sdcard/FTP son
 # dos cosas distintas. Si un intento anterior dejó el FUSE pero no el bind,
-# solo hay que completar el bind (antes salía con "Ya estaba montado" sin
-# hacerlo, y el bind nunca aparecía).
+# solo hay que completar el bind.
 is_fuse_mounted() { grep -q " $RCLONE_MOUNTPOINT " /proc/mounts; }
-is_bound() { grep -q " $TARGET_PATH " /proc/mounts; }
+
+# OJO: /proc/mounts muestra la ruta REAL ya resuelta (/sdcard es un symlink
+# a /storage/emulated/0 o similar), nunca "/sdcard/FTP". Buscar ese texto
+# ahí daba siempre "no está bound" aunque el bind sí se hubiera hecho, y el
+# script reportaba "Falló el bind" en cada intento (apilando un bind nuevo
+# encima del anterior cada vez). Se compara el id de dispositivo: un bind
+# de la carpeta FUSE tiene exactamente el mismo st_dev que el original.
+is_bound_at() {
+    a="$(stat -c %d "$1" 2>/dev/null)"
+    b="$(stat -c %d "$RCLONE_MOUNTPOINT" 2>/dev/null)"
+    [ -n "$a" ] && [ "$a" = "$b" ]
+}
+
+try_bind() {
+    # $1 = ruta destino a probar
+    mkdir -p "$1" 2>>"$LOG_FILE"
+    is_bound_at "$1" && return 0
+    err="$(mount --bind "$RCLONE_MOUNTPOINT" "$1" 2>&1)" || \
+        echo "$(date): mount --bind hacia $1 falló: $err" >> "$LOG_FILE"
+    is_bound_at "$1"
+}
+
+# Ruta de respaldo: el almacenamiento real debajo de /sdcard. Dentro del
+# namespace de PID 1 a veces /sdcard no apunta a la vista de usuario.
+fallback_path() {
+    case "$TARGET_PATH" in
+        /sdcard/*) echo "/data/media/0/${TARGET_PATH#/sdcard/}" ;;
+        /storage/emulated/0/*) echo "/data/media/0/${TARGET_PATH#/storage/emulated/0/}" ;;
+        /storage/self/primary/*) echo "/data/media/0/${TARGET_PATH#/storage/self/primary/}" ;;
+    esac
+}
 
 do_bind() {
-    is_bound || mount --bind "$RCLONE_MOUNTPOINT" "$TARGET_PATH"
-    if is_bound; then
-        # Se guarda el TARGET_PATH real usado (no solo el de config): si el
-        # usuario cambia la ruta desde la app mientras esto sigue montado en
-        # la anterior, unmount.sh debe seguir apuntando a esta, no a la nueva.
-        echo "{\"mounted\":true,\"remote\":\"$ACTIVE\",\"target\":\"$TARGET_PATH\"}" > "$STATUS_FILE"
-        echo "$(date): '$ACTIVE' montado correctamente en $TARGET_PATH" >> "$LOG_FILE"
-        exit 0
+    USED="$TARGET_PATH"
+    if ! try_bind "$TARGET_PATH"; then
+        FB="$(fallback_path)"
+        if [ -n "$FB" ] && try_bind "$FB"; then
+            USED="$FB"
+        else
+            echo '{"mounted":false}' > "$STATUS_FILE"
+            echo "$(date): Falló el bind hacia $TARGET_PATH" >> "$LOG_FILE"
+            exit 1
+        fi
     fi
-    echo '{"mounted":false}' > "$STATUS_FILE"
-    echo "$(date): Falló el bind hacia $TARGET_PATH" >> "$LOG_FILE"
-    exit 1
+    # Se guarda la ruta REAL usada: unmount.sh debe apuntar a esta aunque
+    # el usuario cambie la ruta desde la app mientras sigue montado.
+    echo "{\"mounted\":true,\"remote\":\"$ACTIVE\",\"target\":\"$USED\"}" > "$STATUS_FILE"
+    echo "$(date): '$ACTIVE' montado correctamente en $USED" >> "$LOG_FILE"
+    exit 0
 }
 
 if is_fuse_mounted; then

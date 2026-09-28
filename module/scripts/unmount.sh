@@ -22,7 +22,12 @@ if [ -z "$TARGET_PATH" ]; then
 fi
 [ -z "$TARGET_PATH" ] && TARGET_PATH="/sdcard/FTP"
 
-umount -l "$TARGET_PATH" 2>>"$LOG_FILE"
+# Se desmonta en bucle: intentos anteriores pueden haber dejado varios binds
+# apilados en la misma carpeta.
+i=0
+while [ "$i" -lt 10 ] && umount -l "$TARGET_PATH" 2>/dev/null; do
+    i=$((i + 1))
+done
 umount -l "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || "$MODDIR/bin/fusermount3" -u "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE"
 
 # Por si el mount corre como proceso en background
