@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ '**' ]
     tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
@@ -158,7 +158,9 @@ jobs:
           path: rclone-ftp-bind-module.zip
 
   release:
-    if: github.event_name == 'push'
+    # Cada corrida exitosa (build-app + package-module OK) publica su propio
+    # release. Los PR quedan fuera: desde forks el token no tiene escritura.
+    if: github.event_name != 'pull_request'
     needs: [ build-app, package-module ]
     runs-on: ubuntu-latest
     permissions:
@@ -168,22 +170,22 @@ jobs:
         with:
           path: dist
 
-      # Release fija con tag "latest": cada push exitoso a main la
-      # sobrescribe (mismos assets, un solo release siempre vigente), sin
-      # necesidad de crear tags manualmente.
-      - name: Publicar/actualizar release "latest"
+      # Push de tag v*  -> release con ese tag.
+      # Cualquier otro  -> release "build-<n>" apuntando al commit exacto.
+      - name: Publicar release
         uses: softprops/action-gh-release@v2
         env:
-          # La acción lee el token de esta variable de entorno; sin ella
-          # falla la autenticación contra la API y el release nunca se
-          # crea/actualiza (con permissions.contents:write solo se le da
-          # permiso de escritura al token por default, pero hay que
-          # pasárselo explícitamente igual).
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: latest
-          name: "Build automático"
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || format('Build #{0}', github.run_number) }}
           body: |
-            Build generado automáticamente desde el commit ${{ github.sha }}.
+            Build automático #${{ github.run_number }}
+            Commit: ${{ github.sha }}
+            Rama/tag: ${{ github.ref_name }}
           make_latest: true
-          files: dist/rclone-ftp-bind-module/*.zip
+          fail_on_unmatched_files: true
+          files: |
+            dist/rclone-ftp-bind-module/*.zip
+            dist/app-debug-apk/*.apk

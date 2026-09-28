@@ -14,7 +14,8 @@ module/    Módulo KernelSU (scripts de montaje + binario rclone)
 
 1. El zip del módulo trae el APK embebido (`module/app.apk`). Al flashear
    el módulo desde el Manager de KernelSU (con el sistema arrancado),
-   `customize.sh` corre `pm install -r` automáticamente: instala la app la
+   `customize.sh` instala la app automáticamente (`scripts/install_app.sh`:
+   `pm`/`cmd package`, por ruta y por stdin): instala la app la
    primera vez y la **actualiza sin perder datos** en cada reflasheo, ya
    que `-r` sobrescribe la instalación existente conservando su config.
    Si el módulo se flashea desde recovery (sistema no arrancado), no hay
@@ -43,10 +44,11 @@ El workflow `.github/workflows/build.yml` corre en cada push/PR y en tags `v*`:
 2. **package-module**: descarga el binario `rclone` (linux-arm64) oficial,
    lo coloca en `module/bin/`, y empaqueta el módulo como zip flasheable de
    KernelSU. Sube el zip como artifact.
-3. **release**: si el push es un tag `v*` (ej. `v0.1.0`), crea una Release
-   en GitHub adjuntando el APK y el zip del módulo.
+3. **release**: en cada push o ejecución manual cuyo build termine bien,
+   publica un Release con el zip del módulo y el APK. Un push normal crea
+   `build-<n>`; un tag `v*` crea el release con ese nombre. Los PR no publican.
 
-Para lanzar una versión: `git tag v0.1.0 && git push origin v0.1.0`.
+Para una versión con nombre: `git tag v0.1.0 && git push origin v0.1.0`.
 
 No hace falta tener Android Studio ni el binario de rclone en local para
 que el CI compile y empaquete todo.
