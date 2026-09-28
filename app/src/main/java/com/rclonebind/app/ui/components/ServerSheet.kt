@@ -27,11 +27,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.rclonebind.app.net.FTP_SCAN_HOST_COUNT
 import com.rclonebind.app.net.FoundFtpServer
 import com.rclonebind.app.net.scanForFtpServers
 import com.rclonebind.app.root.FtpProfile
@@ -66,6 +66,8 @@ fun ServerSheet(
     var scanJob by remember { mutableStateOf<Job?>(null) }
     var scanning by remember { mutableStateOf(false) }
     var scanChecked by remember { mutableStateOf(0) }
+    var scanTotal by remember { mutableStateOf(1) }
+    val context = LocalContext.current
     var scanResults by remember { mutableStateOf<List<FoundFtpServer>>(emptyList()) }
     var scanMessage by remember { mutableStateOf<String?>(null) }
 
@@ -73,12 +75,13 @@ fun ServerSheet(
         scanResults = emptyList()
         scanMessage = null
         scanChecked = 0
+        scanTotal = 1
         scanning = true
         scanJob = scope.launch {
             try {
-                val found = scanForFtpServers { checked, _ -> scanChecked = checked }
+                val found = scanForFtpServers(context) { checked, total -> scanChecked = checked; scanTotal = total }
                 scanResults = found
-                scanMessage = if (found.isEmpty()) "No se encontró ningún servidor FTP en la red" else null
+                scanMessage = if (found.isEmpty()) "No se encontró ningún servidor FTP. Verifica que estés en Wi-Fi y que el servidor esté encendido (puertos 21, 2121, 2221, 2222)." else null
             } catch (e: CancellationException) {
                 throw e // el usuario tocó "Cancelar búsqueda"; no es un error
             } catch (e: Exception) {
@@ -119,12 +122,12 @@ fun ServerSheet(
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (scanning) "Cancelar búsqueda ($scanChecked/$FTP_SCAN_HOST_COUNT)" else "Buscar servidores FTP en mi red")
+                Text(if (scanning) "Cancelar búsqueda ($scanChecked/$scanTotal)" else "Buscar servidores FTP en mi red")
             }
 
             if (scanning) {
                 LinearProgressIndicator(
-                    progress = { scanChecked / FTP_SCAN_HOST_COUNT.toFloat() },
+                    progress = { scanChecked / scanTotal.toFloat() },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -145,7 +148,8 @@ fun ServerSheet(
                             onClick = {
                                 host = server.ip
                                 hostError = null
-                                if (port.isBlank()) port = "21"
+                                port = server.port.toString()
+                                portError = null
                                 scanResults = emptyList()
                             },
                             shape = MaterialTheme.shapes.medium,
@@ -153,7 +157,7 @@ fun ServerSheet(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(Modifier.padding(12.dp)) {
-                                Text(server.ip, style = MaterialTheme.typography.bodyLarge)
+                                Text("${server.ip}:${server.port}", style = MaterialTheme.typography.bodyLarge)
                                 if (!server.banner.isNullOrBlank()) {
                                     Text(
                                         server.banner,

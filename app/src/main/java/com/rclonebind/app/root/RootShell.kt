@@ -72,27 +72,23 @@ object RootShell {
         val old = original?.let { conf[it] }
         var obscured: String? = old?.get("pass")
 
-        if (pass.isNotEmpty()) {
+        // Sin contraseña (FTP anónimo / abierto) también hay que guardar el
+        // valor ofuscado de la cadena vacía: rclone hace Reveal() del campo
+        // "pass" al crear el remoto y con la clave ausente/vacía falla con
+        // "NewFS decrypt password: input too short when revealing password".
+        if (pass.isNotEmpty() || obscured.isNullOrEmpty()) {
             // rclone espera la contraseña "ofuscada" (reversible, no es
-            // cifrado): en texto plano falla con "input too short when
-            // revealing password". Por eso pasa por "rclone obscure".
-            //
-            // Esta app corre con FLAG_REDIRECT_STDERR (stderr mezclado con
-            // stdout para TODOS los comandos). Sin --config ni HOME fijados
-            // acá (a diferencia de mount.sh), rclone a veces imprime un
-            // aviso como "NOTICE: Config file ... not found" antes de la
-            // contraseña ofuscada. Con joinToString("") ese aviso quedaba
-            // pegado a la contraseña real sin separador, corrompiéndola
-            // silenciosamente — el bind fallaba después con "input too
-            // short when revealing password". Por eso ahora se toma solo la
-            // última línea no vacía: la contraseña ofuscada es siempre lo
-            // último que imprime el comando.
+            // cifrado). stderr va a /dev/null porque la app mezcla stderr con
+            // stdout; se toma la última línea no vacía y se valida el formato
+            // (base64url de IV de 16 bytes + datos => mínimo 22 caracteres).
             val obscure = Shell.cmd("${ModulePaths.BIN} obscure ${sq(pass)} 2>/dev/null").exec()
             if (!obscure.isSuccess) {
                 return Result(false, "No se pudo ofuscar la contraseña: " + obscure.out.joinToString("\n"))
             }
             val value = obscure.out.lastOrNull { it.isNotBlank() }?.trim().orEmpty()
-            if (value.isEmpty()) return Result(false, "rclone obscure devolvió un valor vacío")
+            if (!Regex("^[A-Za-z0-9_-]{22,}$").matches(value)) {
+                return Result(false, "rclone obscure devolvió un valor inválido: ${value.take(60)}")
+            }
             obscured = value
         }
 
