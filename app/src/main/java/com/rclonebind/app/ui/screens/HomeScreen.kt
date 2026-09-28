@@ -144,11 +144,15 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(selected?.name ?: "Ninguno", style = MaterialTheme.typography.titleLarge)
+                        // v1.5.2: antes iba en titleLarge/bodyMedium, más grande
+                        // que el resto de las tarjetas. Se baja a titleMedium/
+                        // bodySmall para que quede al mismo tamaño que los
+                        // títulos y descripciones del apartado Rendimiento.
+                        Text(selected?.name ?: "Ninguno", style = MaterialTheme.typography.titleMedium)
                         if (selected != null) {
                             Text(
                                 if (selected.user.isEmpty()) selected.host else "${selected.user}@${selected.host}",
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = scheme.onSurfaceVariant
                             )
                         }
@@ -239,35 +243,40 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                 }
             }
 
-            val custom = vm.cacheGb
-            val effective = custom ?: defaultCacheGb(vm.perfMode)
-            var draft by remember(effective) { mutableStateOf(effective.toFloat()) }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Tamaño de caché", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "${draft.roundToInt()} GB" + if (custom == null) " (auto)" else "",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = scheme.primary
+            // v1.5.2: igual que "Caché en RAM", el tamaño de caché solo tiene
+            // sentido en modo Máximo (en Equilibrado no se usa un tamaño
+            // configurable), así que se oculta por completo en Equilibrado.
+            if (vm.perfMode == PerfMode.MAX) {
+                val custom = vm.cacheGb
+                val effective = custom ?: defaultCacheGb(vm.perfMode)
+                var draft by remember(effective) { mutableStateOf(effective.toFloat()) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Tamaño de caché", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "${draft.roundToInt()} GB" + if (custom == null) " (auto)" else "",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = scheme.primary
+                    )
+                }
+                Slider(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    onValueChangeFinished = { vm.setCacheGb(draft.roundToInt()) },
+                    valueRange = CACHE_GB_MIN.toFloat()..CACHE_GB_MAX.toFloat(),
+                    steps = CACHE_GB_MAX - CACHE_GB_MIN - 1
                 )
-            }
-            Slider(
-                value = draft,
-                onValueChange = { draft = it },
-                onValueChangeFinished = { vm.setCacheGb(draft.roundToInt()) },
-                valueRange = CACHE_GB_MIN.toFloat()..CACHE_GB_MAX.toFloat(),
-                steps = CACHE_GB_MAX - CACHE_GB_MIN - 1
-            )
-            Text(
-                "Aplica a Google Drive y a FTP en modo Máximo. En Máximo se dejan 2 GB libres para no llenar el almacenamiento.",
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant
-            )
-            if (custom != null) {
-                TextButton(onClick = { vm.setCacheGb(null) }) { Text("Restablecer tamaño automático") }
+                Text(
+                    "Aplica a Google Drive y a FTP en modo Máximo. En Máximo se dejan 2 GB libres para no llenar el almacenamiento.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant
+                )
+                if (custom != null) {
+                    TextButton(onClick = { vm.setCacheGb(null) }) { Text("Restablecer tamaño automático") }
+                }
             }
 
             FilledTonalButton(
