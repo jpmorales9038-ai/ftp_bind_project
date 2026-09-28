@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountBox
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -53,6 +54,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.ui.components.LocalContentBottomInset
+import com.rclonebind.app.ui.screens.AboutScreen
 import com.rclonebind.app.ui.screens.HomeScreen
 import com.rclonebind.app.ui.screens.LogsScreen
 import com.rclonebind.app.ui.screens.ServersScreen
@@ -92,6 +94,7 @@ private sealed class Screen(val label: String, val icon: ImageVector) {
     object Home : Screen("Inicio", Icons.Default.Home)
     object Servers : Screen("Servidores", Icons.Default.AccountBox)
     object Logs : Screen("Logs", Icons.AutoMirrored.Filled.List)
+    object About : Screen("Acerca de", Icons.Default.Info)
 }
 
 /** Alto de la píldora (52 + 2×8 de relleno) + separación por arriba y abajo. */
@@ -102,7 +105,7 @@ private val FadeHeight = 104.dp
 
 @Composable
 private fun AppScaffold(vm: BindViewModel) {
-    val items = listOf(Screen.Home, Screen.Servers, Screen.Logs)
+    val items = listOf(Screen.Home, Screen.Servers, Screen.Logs, Screen.About)
     val pagerState = rememberPagerState(pageCount = { items.size })
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -130,7 +133,7 @@ private fun AppScaffold(vm: BindViewModel) {
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            // Deslizar horizontalmente cambia de pestaña. Las 3 páginas se
+            // Deslizar horizontalmente cambia de pestaña. Las 4 páginas se
             // mantienen compuestas para conservar scroll y estado. El pager
             // ocupa todo el alto (es la fuente del desenfoque): cada pantalla
             // suma PillSpace a su relleno inferior vía LocalContentBottomInset.
@@ -144,6 +147,7 @@ private fun AppScaffold(vm: BindViewModel) {
                         Screen.Home -> HomeScreen(vm, onOpenServers = { goTo(1) })
                         Screen.Servers -> ServersScreen(vm)
                         Screen.Logs -> LogsScreen(vm)
+                        Screen.About -> AboutScreen(vm)
                     }
                 }
             }

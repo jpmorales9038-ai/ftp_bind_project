@@ -6,7 +6,7 @@ mediante **rclone** y lo expone como bind en el almacenamiento interno del dispo
 ## Estructura
 
 ```
-app/       App Compose (setup FTP, control de montaje, logs)
+app/       App Compose (Inicio, Servidores, Logs y Acerca de; icono adaptable en res/)
 module/    Módulo KernelSU (scripts de montaje + binario rclone)
 ```
 

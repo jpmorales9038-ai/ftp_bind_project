@@ -36,6 +36,11 @@ object RootShell {
         return Result(result.isSuccess, result.out.joinToString("\n"))
     }
 
+    /** Primera línea de `rclone version` (ej. "rclone v1.68.0"), o null si no hay root / binario. */
+    fun rcloneVersion(): String? =
+        Shell.cmd("${ModulePaths.BIN} version 2>/dev/null | head -n 1").exec().out
+            .firstOrNull { it.isNotBlank() }?.trim()
+
     fun mount(): Result = run("sh ${ModulePaths.SCRIPTS}/mount.sh")
 
     fun unmount(): Result = run("sh ${ModulePaths.SCRIPTS}/unmount.sh")

@@ -143,6 +143,26 @@ object AppIcons {
             fill = SolidColor(Color.Black)
         ).build()
 
+    /**
+     * Logo de la app (mismo dibujo que el icono del launcher): carpeta blanca
+     * con una nube dentro. Va con colores propios: usar con Image, no con Icon.
+     */
+    val Logo: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        ImageVector.Builder(
+            name = "Logo",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).addPath(
+            pathData = addPathNodes("M10,4H4C2.9,4 2.01,4.9 2.01,6L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V8c0,-1.1 -0.9,-2 -2,-2h-8l-2,-2z"),
+            fill = SolidColor(Color.White)
+        ).addPath(
+            pathData = addPathNodes("M9.3,17.4H14.9A2.3,2.3 0 0 0 15.086,12.808A3,3 0 0 0 9.114,12.808A2.3,2.3 0 0 0 9.3,17.4Z"),
+            fill = SolidColor(Color(0xFF0F6E80))
+        ).build()
+    }
+
     val Folder: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
         icon(
             "Folder",
