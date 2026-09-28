@@ -76,11 +76,22 @@ object RootShell {
             // rclone espera la contraseña "ofuscada" (reversible, no es
             // cifrado): en texto plano falla con "input too short when
             // revealing password". Por eso pasa por "rclone obscure".
-            val obscure = Shell.cmd("${ModulePaths.BIN} obscure ${sq(pass)}").exec()
+            //
+            // Esta app corre con FLAG_REDIRECT_STDERR (stderr mezclado con
+            // stdout para TODOS los comandos). Sin --config ni HOME fijados
+            // acá (a diferencia de mount.sh), rclone a veces imprime un
+            // aviso como "NOTICE: Config file ... not found" antes de la
+            // contraseña ofuscada. Con joinToString("") ese aviso quedaba
+            // pegado a la contraseña real sin separador, corrompiéndola
+            // silenciosamente — el bind fallaba después con "input too
+            // short when revealing password". Por eso ahora se toma solo la
+            // última línea no vacía: la contraseña ofuscada es siempre lo
+            // último que imprime el comando.
+            val obscure = Shell.cmd("${ModulePaths.BIN} obscure ${sq(pass)} 2>/dev/null").exec()
             if (!obscure.isSuccess) {
                 return Result(false, "No se pudo ofuscar la contraseña: " + obscure.out.joinToString("\n"))
             }
-            val value = obscure.out.joinToString("").trim()
+            val value = obscure.out.lastOrNull { it.isNotBlank() }?.trim().orEmpty()
             if (value.isEmpty()) return Result(false, "rclone obscure devolvió un valor vacío")
             obscured = value
         }

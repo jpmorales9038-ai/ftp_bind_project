@@ -31,17 +31,21 @@ const val FTP_SCAN_HOST_COUNT = 254
  * es una API de Java estándar, no un servicio del sistema restringido como
  * WifiManager (que además necesita ubicación en versiones recientes de
  * Android para dar la IP completa).
+ *
+ * getNetworkInterfaces() declara SocketException; sin capturarla acá, un
+ * fallo (por ejemplo justo al cambiar de red) se colaba como excepción no
+ * controlada en la corrutina del escaneo y la dejaba trabada en "Cancelar
+ * búsqueda…" para siempre, sin ningún aviso.
  */
-private fun localIPv4(): Inet4Address? {
-    val interfaces = NetworkInterface.getNetworkInterfaces() ?: return null
-    for (iface in interfaces) {
-        if (!iface.isUp || iface.isLoopback) continue
-        for (addr in iface.interfaceAddresses) {
-            val ip = addr.address
-            if (ip is Inet4Address && !ip.isLoopbackAddress) return ip
-        }
-    }
-    return null
+private fun localIPv4(): Inet4Address? = try {
+    NetworkInterface.getNetworkInterfaces()?.asSequence()
+        ?.filter { it.isUp && !it.isLoopback }
+        ?.flatMap { it.interfaceAddresses.asSequence() }
+        ?.map { it.address }
+        ?.filterIsInstance<Inet4Address>()
+        ?.firstOrNull { !it.isLoopbackAddress }
+} catch (e: Exception) {
+    null
 }
 
 /**

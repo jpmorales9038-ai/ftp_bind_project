@@ -37,6 +37,7 @@ import com.rclonebind.app.net.scanForFtpServers
 import com.rclonebind.app.root.FtpProfile
 import com.rclonebind.app.root.cleanHost
 import com.rclonebind.app.root.validateProfileName
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -74,10 +75,19 @@ fun ServerSheet(
         scanChecked = 0
         scanning = true
         scanJob = scope.launch {
-            val found = scanForFtpServers { checked, _ -> scanChecked = checked }
-            scanResults = found
-            scanMessage = if (found.isEmpty()) "No se encontró ningún servidor FTP en la red" else null
-            scanning = false
+            try {
+                val found = scanForFtpServers { checked, _ -> scanChecked = checked }
+                scanResults = found
+                scanMessage = if (found.isEmpty()) "No se encontró ningún servidor FTP en la red" else null
+            } catch (e: CancellationException) {
+                throw e // el usuario tocó "Cancelar búsqueda"; no es un error
+            } catch (e: Exception) {
+                // Antes, cualquier excepción acá dejaba el botón trabado en
+                // "Cancelar búsqueda…" para siempre sin ningún aviso.
+                scanMessage = "No se pudo completar la búsqueda: ${e.message ?: e::class.simpleName}"
+            } finally {
+                scanning = false
+            }
         }
     }
 
