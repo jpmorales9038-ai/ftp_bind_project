@@ -124,6 +124,15 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
         }
 
         val selected = vm.profiles.firstOrNull { it.name == active }
+        val label = when {
+            vm.busy -> "Trabajando…"
+            mounted && (vm.mountedRemote == null || vm.mountedRemote == active) -> "Desmontar"
+            mounted -> "Cambiar a $active"
+            else -> "Montar"
+        }
+        // v1.5.1: se agrupan servidor seleccionado, carpeta de destino y el
+        // botón Montar en una sola SectionCard, en ese orden, para que las
+        // tres acciones del flujo de montaje queden juntas de un vistazo.
         SectionCard(title = "Servidor seleccionado", icon = AppIcons.Cloud) {
             Surface(
                 color = scheme.surfaceContainerLow,
@@ -149,22 +158,46 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                     }
                 }
             }
-        }
 
-        val label = when {
-            vm.busy -> "Trabajando…"
-            mounted && (vm.mountedRemote == null || vm.mountedRemote == active) -> "Desmontar"
-            mounted -> "Cambiar a $active"
-            else -> "Montar"
-        }
-        Button(
-            onClick = { vm.toggleMount() },
-            enabled = !vm.busy && (active != null || mounted),
-            colors = if (mounted) ButtonDefaults.filledTonalButtonColors() else ButtonDefaults.buttonColors(),
-            shape = RoundedCornerShape(24.dp),
-            modifier = Modifier.fillMaxWidth().height(64.dp)
-        ) {
-            Text(label, style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(AppIcons.Folder, contentDescription = null, tint = scheme.primary)
+                Text(
+                    "Carpeta de destino",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Surface(
+                color = scheme.surfaceContainerLow,
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        vm.targetPath,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { showPathDialog = true }) { Text("Cambiar") }
+                }
+            }
+
+            Button(
+                onClick = { vm.toggleMount() },
+                enabled = !vm.busy && (active != null || mounted),
+                colors = if (mounted) ButtonDefaults.filledTonalButtonColors() else ButtonDefaults.buttonColors(),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth().height(64.dp)
+            ) {
+                Text(label, style = MaterialTheme.typography.titleMedium)
+            }
         }
 
         SectionCard(
@@ -182,26 +215,6 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                     style = MaterialTheme.typography.titleMedium
                 )
                 Switch(checked = vm.autostart, onCheckedChange = { vm.setAutostart(it) })
-            }
-        }
-
-        SectionCard(title = "Carpeta de destino", icon = AppIcons.Folder) {
-            Surface(
-                color = scheme.surfaceContainerLow,
-                shape = MaterialTheme.shapes.large,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        vm.targetPath,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f)
-                    )
-                    TextButton(onClick = { showPathDialog = true }) { Text("Cambiar") }
-                }
             }
         }
 
