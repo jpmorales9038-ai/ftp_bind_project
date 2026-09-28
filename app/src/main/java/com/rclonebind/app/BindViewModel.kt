@@ -277,6 +277,12 @@ class BindViewModel : ViewModel() {
         logs = result.output
     }
 
+    /** Borra el log: la pantalla se vacía al instante y el archivo se trunca en segundo plano. */
+    fun clearLogs() {
+        logs = ""
+        viewModelScope.launch { withContext(Dispatchers.IO) { RootShell.clearLog() } }
+    }
+
     private companion object {
         const val AUTH_POLL_MS = 600L
         // El script corta a los 300 s; esto es solo la red de seguridad de la app.

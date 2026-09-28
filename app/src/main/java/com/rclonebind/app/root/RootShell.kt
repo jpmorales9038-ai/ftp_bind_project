@@ -44,6 +44,13 @@ object RootShell {
 
     fun tailLog(lines: Int = 200): Result = run("tail -n $lines ${ModulePaths.LOG_FILE} 2>/dev/null")
 
+    /**
+     * Vacía el log sin borrar el archivo: rclone lo mantiene abierto en modo
+     * append (--log-file), así que truncarlo es seguro y sigue escribiendo
+     * al final del archivo ya vacío.
+     */
+    fun clearLog(): Result = run(": > ${ModulePaths.LOG_FILE}")
+
     // ---- Servidores (una sección [nombre] por servidor en rclone.conf) ----
 
     private fun readConf(): Conf {
