@@ -10,7 +10,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -30,6 +31,7 @@ import com.rclonebind.app.ui.components.FolderPickerDialog
 import com.rclonebind.app.ui.components.ScreenContainer
 import com.rclonebind.app.ui.theme.AppMotion
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
     LaunchedEffect(Unit) { vm.refreshAll() }
@@ -68,7 +70,7 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                     style = MaterialTheme.typography.bodyLarge
                 )
                 if (vm.busy) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                    LinearWavyProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
                 }
             }
         }

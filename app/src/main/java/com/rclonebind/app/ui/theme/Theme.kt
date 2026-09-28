@@ -5,7 +5,9 @@ import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -20,10 +22,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Tema Material 3 con las ideas de "expressive" que sí existen en la
- * librería estable: color dinámico (Material You), esquinas muy redondeadas,
- * tipografía con más peso y animaciones con resorte.
+ * Tema Material 3 Expressive (material3 1.5.0-alpha): color dinámico
+ * (Material You), esquemas de movimiento expressive, esquinas muy
+ * redondeadas y tipografía con más peso.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun RCloneTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -37,8 +40,9 @@ fun RCloneTheme(
         darkTheme -> DarkColors
         else -> LightColors
     }
-    MaterialTheme(
+    MaterialExpressiveTheme(
         colorScheme = colorScheme,
+        motionScheme = MotionScheme.expressive(),
         shapes = AppShapes,
         typography = AppTypography,
         content = content

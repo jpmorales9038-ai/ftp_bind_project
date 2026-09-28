@@ -28,7 +28,7 @@ jobs:
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           curl -fsSL -o cmdline-tools.zip \
-            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
           unzip -q cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
           mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
@@ -39,18 +39,18 @@ jobs:
       - name: Instalar paquetes del SDK y aceptar licencias
         run: |
           yes | sdkmanager --licenses > /dev/null
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.7
+          gradle-version: 8.14.3
 
       # No versionamos gradlew/gradle-wrapper.jar en el repo: los generamos
       # aquí con la Gradle que instaló setup-gradle, así el build es 100%
       # reproducible desde Actions sin depender de nada preinstalado.
       - name: Generar Gradle wrapper
-        run: gradle wrapper --gradle-version 8.7
+        run: gradle wrapper --gradle-version 8.14.3
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --console=plain

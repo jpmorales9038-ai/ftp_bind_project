@@ -12,7 +12,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -42,7 +43,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /** Formulario para agregar un servidor, o editar [initial] si no es null. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ServerSheet(
     initial: FtpProfile?,
@@ -126,7 +127,7 @@ fun ServerSheet(
             }
 
             if (scanning) {
-                LinearProgressIndicator(
+                LinearWavyProgressIndicator(
                     progress = { scanChecked / scanTotal.toFloat() },
                     modifier = Modifier.fillMaxWidth()
                 )

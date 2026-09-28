@@ -6,11 +6,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -36,6 +39,7 @@ import kotlinx.coroutines.withContext
  * Explorador de carpetas del almacenamiento interno para elegir el destino
  * del bind (reemplaza la entrada de texto). Permite navegar y crear carpetas.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun FolderPickerDialog(
     initialPath: String,
@@ -123,7 +127,7 @@ fun FolderPickerDialog(
                     }
                     val list = dirs
                     if (list == null) {
-                        item { Text("Cargando…", modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        item { LoadingIndicator(Modifier.padding(vertical = 12.dp).size(48.dp)) }
                     } else if (list.isEmpty()) {
                         item { Text("Sin subcarpetas", modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     } else {
