@@ -7,7 +7,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -24,18 +27,18 @@ import com.rclonebind.app.ui.components.ScreenContainer
 fun LogsScreen(vm: BindViewModel) {
     LaunchedEffect(Unit) { vm.refreshLogs() }
 
-    ScreenContainer(scroll = false) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Logs de rclone", style = MaterialTheme.typography.headlineMedium)
-            FilledTonalButton(onClick = { vm.refreshLogs() }) { Text("Actualizar") }
+    ScreenContainer(
+        title = "Logs",
+        scroll = false,
+        actions = {
+            IconButton(onClick = { vm.refreshLogs() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Actualizar")
+            }
         }
+    ) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.large,
+            shape = MaterialTheme.shapes.extraLarge,
             modifier = Modifier.fillMaxWidth().weight(1f)
         ) {
             Text(

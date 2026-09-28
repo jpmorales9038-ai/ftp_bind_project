@@ -187,12 +187,17 @@ fun ServerSheet(
             )
 
             if (initial == null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     RemoteType.entries.forEach { option ->
-                        FilterChip(
+                        OptionTile(
+                            label = option.label,
+                            icon = if (option == RemoteType.FTP) AppIcons.Dns else AppIcons.Cloud,
                             selected = type == option,
                             onClick = { type = option },
-                            label = { Text(option.label) }
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }

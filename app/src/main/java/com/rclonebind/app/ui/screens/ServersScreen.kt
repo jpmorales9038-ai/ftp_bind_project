@@ -11,6 +11,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,9 +45,14 @@ fun ServersScreen(vm: BindViewModel) {
     }
 
     Box(Modifier.fillMaxSize()) {
-        ScreenContainer {
-            Text("Servidores", style = MaterialTheme.typography.headlineLarge)
-
+        ScreenContainer(
+            title = "Servidores",
+            actions = {
+                IconButton(onClick = openNew) {
+                    Icon(Icons.Default.Add, contentDescription = "Agregar servidor")
+                }
+            }
+        ) {
             if (vm.profiles.isEmpty()) {
                 Text(
                     "Todavía no hay servidores guardados. Agrega un servidor FTP o tu Google Drive para montarlo como carpeta en tu almacenamiento.",
@@ -70,21 +76,7 @@ fun ServersScreen(vm: BindViewModel) {
                     },
                     onDelete = { deleteTarget = it }
                 )
-                // Espacio para que el botón flotante no tape la última tarjeta
-                Spacer(Modifier.height(72.dp))
             }
-        }
-
-        if (vm.profiles.isNotEmpty()) {
-            ExtendedFloatingActionButton(
-                onClick = openNew,
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Agregar") },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(20.dp)
-                    .padding(bottom = LocalContentBottomInset.current)
-            )
         }
     }
 

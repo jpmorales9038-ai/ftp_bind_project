@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -46,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -95,6 +97,9 @@ private sealed class Screen(val label: String, val icon: ImageVector) {
 /** Alto de la píldora (52 + 2×8 de relleno) + separación por arriba y abajo. */
 private val PillSpace = 88.dp
 
+/** Alto del degradado que funde el contenido con la barra del sistema. */
+private val FadeHeight = 104.dp
+
 @Composable
 private fun AppScaffold(vm: BindViewModel) {
     val items = listOf(Screen.Home, Screen.Servers, Screen.Logs)
@@ -142,6 +147,25 @@ private fun AppScaffold(vm: BindViewModel) {
                     }
                 }
             }
+
+            // Difuminado inferior: desde la barra de navegación del sistema hacia
+            // arriba el contenido se funde con el fondo. Va sobre el pager y bajo
+            // la píldora; no intercepta toques.
+            val fade = MaterialTheme.colorScheme.background
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(FadeHeight)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.35f to fade.copy(alpha = 0.25f),
+                            0.7f to fade.copy(alpha = 0.7f),
+                            1f to fade.copy(alpha = 0.96f)
+                        )
+                    )
+            )
 
             FloatingPillNav(
                 items = items,

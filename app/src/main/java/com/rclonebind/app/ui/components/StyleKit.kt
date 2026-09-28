@@ -1,0 +1,166 @@
+package com.rclonebind.app.ui.components
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
+
+/**
+ * Tarjeta de sección: superficie muy redondeada con encabezado
+ * (icono + título), subtítulo opcional y el contenido debajo.
+ * Todos los colores salen del esquema del sistema.
+ */
+@Composable
+fun SectionCard(
+    title: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        color = scheme.surfaceContainer,
+        shape = MaterialTheme.shapes.extraLarge,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Icon(icon, contentDescription = null, tint = scheme.primary)
+                Text(title, style = MaterialTheme.typography.titleLarge)
+            }
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariant
+                )
+            }
+            content()
+        }
+    }
+}
+
+/**
+ * Opción seleccionable tipo "Curve / Sliders": icono en un círculo más la
+ * etiqueta. Seleccionada: relleno primaryContainer, contorno primary y el
+ * círculo en primary. Sin seleccionar: relleno tenue y círculo neutro.
+ */
+@Composable
+fun OptionTile(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(28.dp)
+    val container by animateColorAsState(
+        if (selected) scheme.primaryContainer else scheme.surfaceContainerLow,
+        label = "tileContainer"
+    )
+    val outline by animateColorAsState(
+        if (selected) scheme.primary else Color.Transparent, label = "tileOutline"
+    )
+    val badge by animateColorAsState(
+        if (selected) scheme.primary else scheme.surfaceContainerHighest,
+        label = "tileBadge"
+    )
+    val badgeContent by animateColorAsState(
+        if (selected) scheme.onPrimary else scheme.onSurfaceVariant, label = "tileBadgeContent"
+    )
+
+    Row(
+        modifier = modifier
+            .height(72.dp)
+            .clip(shape)
+            .background(container)
+            .border(2.dp, outline, shape)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).background(badge),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = badgeContent)
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (selected) scheme.onPrimaryContainer else scheme.onSurface,
+            maxLines = 1
+        )
+    }
+}
+
+/** Iconos que no están en material-icons-core, dibujados con los paths estándar. */
+object AppIcons {
+    private fun icon(name: String, path: String): ImageVector =
+        ImageVector.Builder(
+            name = name,
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).addPath(
+            pathData = addPathNodes(path),
+            fill = SolidColor(Color.Black)
+        ).build()
+
+    val Folder: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        icon(
+            "Folder",
+            "M10,4H4C2.9,4 2.01,4.9 2.01,6L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V8c0,-1.1 -0.9,-2 -2,-2h-8l-2,-2z"
+        )
+    }
+
+    val Cloud: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        icon(
+            "Cloud",
+            "M19.35,10.04C18.67,6.59 15.64,4 12,4 9.11,4 6.6,5.64 5.35,8.04 2.34,8.36 0,10.91 0,14c0,3.31 2.69,6 6,6h13c2.76,0 5,-2.24 5,-5 0,-2.64 -2.05,-4.78 -4.65,-4.96z"
+        )
+    }
+
+    val Dns: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        icon(
+            "Dns",
+            "M20,13H4c-0.55,0 -1,0.45 -1,1v6c0,0.55 0.45,1 1,1h16c0.55,0 1,-0.45 1,-1v-6c0,-0.55 -0.45,-1 -1,-1zM7,19c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2zM20,3H4c-0.55,0 -1,0.45 -1,1v6c0,0.55 0.45,1 1,1h16c0.55,0 1,-0.45 1,-1V4c0,-0.55 -0.45,-1 -1,-1zM7,9c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2z"
+        )
+    }
+}

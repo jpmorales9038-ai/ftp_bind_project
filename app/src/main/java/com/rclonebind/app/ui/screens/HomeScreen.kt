@@ -8,9 +8,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -27,8 +32,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
+import com.rclonebind.app.ui.components.AppIcons
 import com.rclonebind.app.ui.components.FolderPickerDialog
 import com.rclonebind.app.ui.components.ScreenContainer
+import com.rclonebind.app.ui.components.SectionCard
 import com.rclonebind.app.ui.theme.AppMotion
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -49,7 +56,14 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
         AppMotion.effects(), label = "heroContent"
     )
 
-    ScreenContainer {
+    ScreenContainer(
+        title = "Inicio",
+        actions = {
+            IconButton(onClick = { vm.refreshAll() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Actualizar")
+            }
+        }
+    ) {
         Surface(
             color = heroColor,
             contentColor = heroContent,
@@ -90,36 +104,30 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
             }
         }
 
-        Surface(
-            color = scheme.surfaceContainer,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+        val selected = vm.profiles.firstOrNull { it.name == active }
+        SectionCard(title = "Servidor seleccionado", icon = AppIcons.Cloud) {
+            Surface(
+                color = scheme.surfaceContainerLow,
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                val selected = vm.profiles.firstOrNull { it.name == active }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "Servidor seleccionado",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = scheme.onSurfaceVariant
-                    )
-                    Text(
-                        selected?.name ?: "Ninguno",
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                    if (selected != null) {
-                        Text(
-                            if (selected.user.isEmpty()) selected.host else "${selected.user}@${selected.host}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = scheme.onSurfaceVariant
-                        )
+                Row(
+                    modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(selected?.name ?: "Ninguno", style = MaterialTheme.typography.titleLarge)
+                        if (selected != null) {
+                            Text(
+                                if (selected.user.isEmpty()) selected.host else "${selected.user}@${selected.host}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = scheme.onSurfaceVariant
+                            )
+                        }
                     }
-                }
-                TextButton(onClick = onOpenServers) {
-                    Text(if (selected == null) "Agregar" else "Cambiar")
+                    TextButton(onClick = onOpenServers) {
+                        Text(if (selected == null) "Agregar" else "Cambiar")
+                    }
                 }
             }
         }
@@ -140,46 +148,40 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
             Text(label, style = MaterialTheme.typography.titleMedium)
         }
 
-        Surface(
-            color = scheme.surfaceContainer,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier.fillMaxWidth()
+        SectionCard(
+            title = "Montar al iniciar",
+            icon = Icons.Default.PlayArrow,
+            subtitle = "Monta el servidor seleccionado cuando arranca el teléfono."
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Montar al iniciar", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Monta el servidor seleccionado cuando arranca el teléfono.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = scheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    if (vm.autostart) "Activado" else "Desactivado",
+                    style = MaterialTheme.typography.titleMedium
+                )
                 Switch(checked = vm.autostart, onCheckedChange = { vm.setAutostart(it) })
             }
         }
 
-        Surface(
-            color = scheme.surfaceContainer,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+        SectionCard(title = "Carpeta de destino", icon = AppIcons.Folder) {
+            Surface(
+                color = scheme.surfaceContainerLow,
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        "Carpeta de destino",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = scheme.onSurfaceVariant
+                        vm.targetPath,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f)
                     )
-                    Text(vm.targetPath, style = MaterialTheme.typography.titleMedium)
-                }
-                TextButton(onClick = { showPathDialog = true }) {
-                    Text("Cambiar")
+                    TextButton(onClick = { showPathDialog = true }) { Text("Cambiar") }
                 }
             }
         }
