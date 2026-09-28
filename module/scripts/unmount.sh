@@ -22,6 +22,12 @@ if [ -z "$TARGET_PATH" ]; then
 fi
 [ -z "$TARGET_PATH" ] && TARGET_PATH="/sdcard/FTP"
 
+# Primero se marca como desmontado y se detiene el watcher; si no, volvería
+# a crear el bind apenas se quite.
+echo '{"mounted":false}' > "$STATUS_FILE"
+[ -f "$MODDIR/watch.pid" ] && kill "$(cat "$MODDIR/watch.pid")" 2>/dev/null
+rm -f "$MODDIR/watch.pid"
+
 # Se desmonta en bucle: intentos anteriores pueden haber dejado varios binds
 # apilados en la misma carpeta.
 i=0

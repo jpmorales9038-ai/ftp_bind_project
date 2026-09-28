@@ -134,6 +134,9 @@ do_bind() {
     # el usuario cambie la ruta desde la app mientras sigue montado.
     echo "{\"mounted\":true,\"remote\":\"$ACTIVE\",\"target\":\"$USED\"}" > "$STATUS_FILE"
     echo "$(date): '$ACTIVE' montado correctamente en $USED" >> "$LOG_FILE"
+    # Vigila el bind y lo rehace si algo (p. ej. el launcher del juego) lo
+    # quita. Stdio a /dev/null para no dejar colgada la shell root de la app.
+    ( sh "$MODDIR/scripts/watch.sh" </dev/null >/dev/null 2>&1 & )
     exit 0
 }
 
