@@ -16,6 +16,7 @@ object ModulePaths {
     const val TARGET_PATH_FILE = "$CONFIG_DIR/target_path"
     const val PERF_FILE = "$CONFIG_DIR/perf"
     const val CACHE_GB_FILE = "$CONFIG_DIR/cache_gb"
+    const val RAM_CACHE_FILE = "$CONFIG_DIR/ram_cache"
     const val STATUS_FILE = "$BASE/status.json"
     const val LOG_FILE = "$BASE/mount.log"
     /** Salida temporal de `rclone authorize` (contiene el token: se borra al terminar). */
@@ -240,6 +241,18 @@ object RootShell {
     fun setCacheGb(gb: Int?): Result =
         if (gb == null) run("rm -f ${ModulePaths.CACHE_GB_FILE}")
         else run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' $gb > ${ModulePaths.CACHE_GB_FILE}")
+
+    /**
+     * Caché en RAM del perfil Máximo. Guarda solo lo que el usuario pidió:
+     * mount.sh decide con root, al montar, si hay memoria libre para
+     * cumplirlo (si no, sigue en disco y lo anota en Logs).
+     */
+    fun readRamCache(): Boolean =
+        Shell.cmd("cat ${ModulePaths.RAM_CACHE_FILE} 2>/dev/null").exec().out.joinToString("").trim() == "1"
+
+    fun setRamCache(enabled: Boolean): Result =
+        if (enabled) run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '1' > ${ModulePaths.RAM_CACHE_FILE}")
+        else run("rm -f ${ModulePaths.RAM_CACHE_FILE}")
 
     // ---- Prueba de rendimiento ----
 

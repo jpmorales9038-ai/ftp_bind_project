@@ -30,7 +30,6 @@ TARGET_PATH="$(cat "$MODDIR/config/target_path" 2>/dev/null)"
 
 # HOME, PATH (fusermount3) y certificados TLS para rclone: ver env.sh.
 . "$MODDIR/scripts/env.sh"
-mkdir -p "$CACHE_DIR"
 
 if [ ! -f "$RCLONE_CONF" ]; then
     echo "$(date): No hay rclone.conf, configura el FTP desde la app" >> "$LOG_FILE"
@@ -51,6 +50,36 @@ fi
 # comprobar que el montaje activo las tiene aplicadas).
 . "$MODDIR/scripts/perf_opts.sh"
 compute_mount_opts
+
+# Caché en RAM (tmpfs) del perfil Máximo: opcional, la activa el usuario
+# desde la app con una confirmación explícita (usa RAM mientras esté montado
+# y se pierde al desmontar o reiniciar). Se decide aquí, con root, porque hay
+# que comprobar la RAM libre antes de montar el tmpfs; unmount.sh la libera.
+# Fuente de verdad de si está activa: que el tmpfs esté realmente montado en
+# RAM_CACHE_DIR (no el archivo de config, que solo expresa lo que se pidió) —
+# así perf_test.sh puede saberlo con una simple lectura de /proc/mounts.
+RAM_CACHE_DIR="$MODDIR/cache_ram"
+if [ "$PERF" = max ] && [ "$(cat "$MODDIR/config/ram_cache" 2>/dev/null)" = "1" ]; then
+    NEED_MB=$(( ${CACHE_GB:-10} * 1024 + 256 ))
+    AVAIL_KB="$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null)"
+    case "$AVAIL_KB" in ''|*[!0-9]*) AVAIL_KB=0 ;; esac
+    AVAIL_MB=$(( AVAIL_KB / 1024 ))
+    if [ "$AVAIL_MB" -ge "$NEED_MB" ]; then
+        mkdir -p "$RAM_CACHE_DIR"
+        if ! grep -q " $RAM_CACHE_DIR tmpfs" /proc/mounts; then
+            mount -t tmpfs -o "size=${CACHE_GB:-10}G,mode=0700" tmpfs "$RAM_CACHE_DIR" 2>>"$LOG_FILE"
+        fi
+        if grep -q " $RAM_CACHE_DIR tmpfs" /proc/mounts; then
+            CACHE_DIR="$RAM_CACHE_DIR"
+            echo "$(date): Caché en RAM activa (${CACHE_GB:-10}G, ${AVAIL_MB}M libres)" >> "$LOG_FILE"
+        else
+            echo "$(date): No se pudo montar el tmpfs de caché en RAM, se usa disco" >> "$LOG_FILE"
+        fi
+    else
+        echo "$(date): Caché en RAM pedida pero solo hay ${AVAIL_MB}M libres (hacen falta ${NEED_MB}M); se usa disco" >> "$LOG_FILE"
+    fi
+fi
+mkdir -p "$CACHE_DIR"
 
 mkdir -p "$RCLONE_MOUNTPOINT"
 # Estado actual: el montaje FUSE de rclone y el bind sobre /sdcard/FTP son
@@ -108,6 +137,15 @@ do_bind() {
     # Vigila el bind y lo rehace si algo (p. ej. el launcher del juego) lo
     # quita. Stdio a /dev/null para no dejar colgada la shell root de la app.
     ( sh "$MODDIR/scripts/watch.sh" </dev/null >/dev/null 2>&1 & )
+
+    # Precarga automática de la caché (ver preload.sh: no hace nada si el
+    # perfil activo no cachea lecturas completas). Se corta cualquier
+    # precarga anterior antes de lanzar esta, para no acumular procesos en
+    # remontajes seguidos.
+    pkill -f "$MODDIR/scripts/preload.sh" 2>/dev/null
+    rm -rf "$MODDIR/preload.lock"
+    ( sh "$MODDIR/scripts/preload.sh" </dev/null >/dev/null 2>&1 & )
+
     exit 0
 }
 

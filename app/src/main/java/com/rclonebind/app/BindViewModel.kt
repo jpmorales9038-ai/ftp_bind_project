@@ -35,7 +35,8 @@ private class Snapshot(
     val targetPath: String,
     val perfMode: PerfMode,
     val cacheGb: Int?,
-    val cacheKb: Long
+    val cacheKb: Long,
+    val ramCache: Boolean
 )
 
 class BindViewModel : ViewModel() {
@@ -77,6 +78,9 @@ class BindViewModel : ViewModel() {
     var driveAuth by mutableStateOf<DriveAuthState>(DriveAuthState.Idle)
         private set
     /** Prueba de rendimiento: la muestra PerfTestSheet. */
+    /** Caché en RAM del perfil Máximo (config/ram_cache); mount.sh decide si hay memoria para cumplirlo. */
+    var ramCache by mutableStateOf(false)
+        private set
     var perfTest by mutableStateOf(PerfTestState())
         private set
     /** Mensaje de una sola vez; la UI lo muestra en un snackbar y lo consume. */
@@ -124,7 +128,8 @@ class BindViewModel : ViewModel() {
                 targetPath = RootShell.readTargetPath(),
                 perfMode = RootShell.readPerfMode(),
                 cacheGb = RootShell.readCacheGb(),
-                cacheKb = RootShell.cacheSizeKb()
+                cacheKb = RootShell.cacheSizeKb(),
+                ramCache = RootShell.readRamCache()
             )
         }
 
@@ -145,6 +150,7 @@ class BindViewModel : ViewModel() {
         perfMode = snap.perfMode
         cacheGb = snap.cacheGb
         cacheKb = snap.cacheKb
+        ramCache = snap.ramCache
         isMounted = snap.status.contains("\"mounted\":true")
         mountedRemote = if (isMounted) {
             Regex("\"remote\":\"([^\"]*)\"").find(snap.status)?.groupValues?.get(1)
@@ -379,6 +385,21 @@ class BindViewModel : ViewModel() {
     fun setCacheGb(gb: Int?) = viewModelScope.launch {
         cacheGb = gb
         val result = withContext(Dispatchers.IO) { RootShell.setCacheGb(gb) }
+        message = when {
+            !result.success -> "Error al guardar: ${result.output.take(200)}"
+            isMounted -> "Guardado. Vuelve a montar para aplicarlo."
+            else -> null
+        }
+    }
+
+    /**
+     * Caché en RAM del perfil Máximo. La app solo guarda si el usuario la
+     * pidió; mount.sh comprueba la memoria libre y decide de verdad al
+     * montar (si no alcanza, sigue en disco y lo deja en Logs).
+     */
+    fun setRamCache(enabled: Boolean) = viewModelScope.launch {
+        ramCache = enabled
+        val result = withContext(Dispatchers.IO) { RootShell.setRamCache(enabled) }
         message = when {
             !result.success -> "Error al guardar: ${result.output.take(200)}"
             isMounted -> "Guardado. Vuelve a montar para aplicarlo."

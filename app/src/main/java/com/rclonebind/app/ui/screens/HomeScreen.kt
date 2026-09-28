@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -61,6 +62,7 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
     val mounted = vm.isMounted
     val active = vm.activeName
     var showPathDialog by remember { mutableStateOf(false) }
+    var showRamCacheConfirm by remember { mutableStateOf(false) }
     var showPerfTest by remember { mutableStateOf(false) }
     val heroColor by animateColorAsState(
         if (mounted) scheme.primaryContainer else scheme.surfaceContainerHigh,
@@ -268,6 +270,30 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                 Text("Probar rendimiento", style = MaterialTheme.typography.titleMedium)
             }
 
+            if (vm.perfMode == PerfMode.MAX) {
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Caché en RAM", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Lecturas y escrituras a velocidad de RAM. Se pierde al desmontar o reiniciar.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = scheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = vm.ramCache,
+                        onCheckedChange = { enabled ->
+                            if (enabled) showRamCacheConfirm = true else vm.setRamCache(false)
+                        }
+                    )
+                }
+            }
+
             HorizontalDivider()
 
             Row(
@@ -292,6 +318,33 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (showRamCacheConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRamCacheConfirm = false },
+            title = { Text("¿Activar caché en RAM?") },
+            text = {
+                Text(
+                    "La caché del perfil Máximo se guardará en la memoria RAM del " +
+                        "teléfono en vez del almacenamiento interno: lecturas y escrituras " +
+                        "mucho más rápidas mientras esté montado. Ocupa esa RAM todo el " +
+                        "tiempo que dure el montaje y su contenido se pierde al desmontar " +
+                        "o reiniciar (se reconstruye solo, como cualquier caché). Si al " +
+                        "montar no hay memoria suficiente, se usa el almacenamiento interno " +
+                        "sin más aviso que una línea en Logs."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.setRamCache(true)
+                    showRamCacheConfirm = false
+                }) { Text("Activar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRamCacheConfirm = false }) { Text("Cancelar") }
+            }
+        )
     }
 
     if (showPerfTest) {

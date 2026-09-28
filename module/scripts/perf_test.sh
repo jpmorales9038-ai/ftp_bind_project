@@ -29,6 +29,14 @@ STATUS_FILE="$MODDIR/status.json"
 RCLONE_CONF="$MODDIR/config/rclone.conf"
 CACHE_DIR="$MODDIR/cache"
 RCLONE_MOUNTPOINT="/data/local/tmp/rclone_ftp"
+# Si la caché en RAM está activa (mount.sh la monta como tmpfs), es la que
+# realmente usa rclone: se miden espacio y crecimiento ahí, no en disco.
+if grep -q " $MODDIR/cache_ram tmpfs" /proc/mounts 2>/dev/null; then
+    CACHE_DIR="$MODDIR/cache_ram"
+    CACHE_IS_RAM=1
+else
+    CACHE_IS_RAM=0
+fi
 TEST_MB=32
 WORST=OK
 TDIR=""
@@ -209,10 +217,12 @@ case "$FREE_KB" in
             *)
                 RESERVE=0
                 case "$MOUNT_OPTS" in *min-free-space*) RESERVE=2 ;; esac
+                WHERE="en el almacenamiento"
+                [ "$CACHE_IS_RAM" = 1 ] && WHERE="en RAM"
                 if [ "$FREE_GB" -lt $(( NEED + RESERVE )) ]; then
-                    step space WARN "Solo quedan $FREE_GB GB libres: no caben la caché de $NEED GB y la reserva de $RESERVE GB. rclone la irá recortando."
+                    step space WARN "Solo quedan $FREE_GB GB libres $WHERE: no caben la caché de $NEED GB y la reserva de $RESERVE GB. rclone la irá recortando."
                 else
-                    step space OK "$FREE_GB GB libres, de sobra para una caché de $NEED GB."
+                    step space OK "$FREE_GB GB libres $WHERE, de sobra para una caché de $NEED GB."
                 fi
                 ;;
         esac

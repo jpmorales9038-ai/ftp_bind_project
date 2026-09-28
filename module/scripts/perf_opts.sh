@@ -35,6 +35,21 @@ compute_mount_opts() {
     CACHE_GB="$(cat "$MODDIR/config/cache_gb" 2>/dev/null)"
     case "$CACHE_GB" in ''|*[!0-9]*|0) CACHE_GB="" ;; esac
 
+    # Extra del perfil Máximo, igual para Drive y FTP:
+    #  - multi-thread-streams/cutoff: los archivos de más de 64M se bajan a la
+    #    caché en 4 conexiones paralelas en vez de una sola (si el remoto lo
+    #    admite; si no, rclone sigue con una sola conexión sin fallar).
+    #  - transfers/checkers: más operaciones de archivo a la vez (sube el
+    #    doble los valores por defecto de rclone, 4 y 8).
+    #  - vfs-write-back: espera más antes de subir un archivo recién escrito,
+    #    para juntar varias escrituras seguidas al mismo archivo en una sola
+    #    subida en vez de una por cada una.
+    #  - vfs-fast-fingerprint: compara archivos por tamaño en vez de con un
+    #    fingerprint más caro de calcular; listados y comparaciones más
+    #    ágiles, a costa de no notar por su contenido un archivo modificado
+    #    fuera de la app que conserve el mismo tamaño.
+    MAX_EXTRA_OPTS="--multi-thread-streams 4 --multi-thread-cutoff 64M --transfers 8 --checkers 16 --vfs-write-back 15s --vfs-fast-fingerprint"
+
     # Opciones de montaje según el perfil y el tipo de remoto. Se dejan sin
     # comillas al invocar rclone para que se separen en palabras.
     #  - balanced: lo de siempre (Drive con caché completa de 1G; FTP solo escrituras).
@@ -43,10 +58,10 @@ compute_mount_opts() {
     #    caché. FTP no avisa de cambios, por eso su dir-cache-time es corto.
     case "$PERF:$(remote_type "$ACTIVE")" in
         max:drive)
-            MOUNT_OPTS="--vfs-cache-mode full --vfs-cache-max-size ${CACHE_GB:-10}G --vfs-cache-max-age 24h --vfs-cache-min-free-space 2G --vfs-read-ahead 256M --vfs-read-chunk-size 64M --vfs-read-chunk-streams 4 --buffer-size 64M --dir-cache-time 12h --drive-chunk-size 64M"
+            MOUNT_OPTS="--vfs-cache-mode full --vfs-cache-max-size ${CACHE_GB:-10}G --vfs-cache-max-age 24h --vfs-cache-min-free-space 2G --vfs-read-ahead 256M --vfs-read-chunk-size 64M --vfs-read-chunk-streams 4 --buffer-size 64M --dir-cache-time 12h --drive-chunk-size 64M $MAX_EXTRA_OPTS"
             ;;
         max:*)
-            MOUNT_OPTS="--vfs-cache-mode full --vfs-cache-max-size ${CACHE_GB:-10}G --vfs-cache-max-age 12h --vfs-cache-min-free-space 2G --vfs-read-ahead 128M --buffer-size 32M --dir-cache-time 10m"
+            MOUNT_OPTS="--vfs-cache-mode full --vfs-cache-max-size ${CACHE_GB:-10}G --vfs-cache-max-age 12h --vfs-cache-min-free-space 2G --vfs-read-ahead 128M --buffer-size 32M --dir-cache-time 10m $MAX_EXTRA_OPTS"
             ;;
         *:drive)
             # Drive no admite escritura parcial ni lecturas con salto sobre la
