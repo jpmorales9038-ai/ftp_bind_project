@@ -63,7 +63,9 @@ module/    Módulo KernelSU (scripts de montaje + binario rclone)
    Drive, `mount.sh` usa `--vfs-cache-mode full` (caché acotada a 1 GB) y el
    módulo agrega `system/etc/resolv.conf` (rclone resuelve DNS leyéndolo y
    Android no lo trae): tras flashear por primera vez hay que **reiniciar**.
-   Si el dispositivo ya tiene uno, el módulo no lo pisa.
+   Si el dispositivo ya tiene uno con nameservers, el módulo no lo pisa. Como
+   respaldo (p. ej. KernelSU sin metamódulo), `env.sh` monta en runtime un
+   overlay de `/system/etc` con un `resolv.conf` propio.
 5. `service.sh` remonta automáticamente al boot si el usuario activó
    "Montar al iniciar" desde la app.
 

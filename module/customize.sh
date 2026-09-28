@@ -21,9 +21,10 @@ fi
 
 # rclone (binario Go estático) resuelve DNS leyendo /etc/resolv.conf, que
 # Android no trae: sin él, Google Drive falla con "lookup ... on [::1]:53".
-# El módulo lo agrega de forma sistémica (system/etc/resolv.conf); si el
-# dispositivo ya tiene uno propio, no se pisa.
-if [ -f /system/etc/resolv.conf ]; then
+# El módulo lo agrega de forma sistémica (system/etc/resolv.conf) y además
+# env.sh monta un overlay de respaldo en runtime. Si el dispositivo ya tiene
+# uno con nameservers, no se pisa.
+if grep -qs '^nameserver' /system/etc/resolv.conf; then
     rm -f "$MODPATH/system/etc/resolv.conf"
 else
     ui_print "- DNS para rclone (Google Drive): requiere reiniciar"
