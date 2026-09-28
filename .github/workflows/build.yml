@@ -52,7 +52,13 @@ jobs:
       - name: Generar Gradle wrapper
         run: gradle wrapper --gradle-version 8.14.3
 
+      # Cliente OAuth de Google Drive integrado en la app (Settings > Secrets
+      # and variables > Actions). Sin ellos (p. ej. PR desde forks) el APK
+      # compila igual y usa el cliente compartido de rclone.
       - name: Build debug APK
+        env:
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
         run: ./gradlew assembleDebug --console=plain
 
       - name: Subir APK

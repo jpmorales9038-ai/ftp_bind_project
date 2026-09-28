@@ -1,7 +1,7 @@
 # RClone FTP Bind
 
-App Jetpack Compose + módulo KernelSU que monta un remoto FTP mediante
-**rclone** y lo expone como bind en el almacenamiento interno del dispositivo.
+App Jetpack Compose + módulo KernelSU que monta un remoto (**FTP** o **Google Drive**)
+mediante **rclone** y lo expone como bind en el almacenamiento interno del dispositivo.
 
 ## Estructura
 
@@ -21,7 +21,7 @@ module/    Módulo KernelSU (scripts de montaje + binario rclone)
    Si el módulo se flashea desde recovery (sistema no arrancado), no hay
    `pm` disponible y el script solo avisa dónde quedó el APK para
    instalarlo a mano.
-2. La app guarda cada servidor FTP como una sección `[nombre]` de
+2. La app guarda cada servidor (FTP o Google Drive) como una sección `[nombre]` de
    `module/config/rclone.conf` (vía root) y recuerda el seleccionado en
    `module/config/active`. En la pestaña **Servidores** se ven como una pila
    de tarjetas: tocar una la selecciona; ahí mismo se agregan, editan y
@@ -30,6 +30,27 @@ module/    Módulo KernelSU (scripts de montaje + binario rclone)
    subred local (puerto 21) con sockets normales de la app —sin root— y
    deja elegir uno para llenar Host/Puerto automáticamente
    (`app/.../net/FtpScanner.kt`).
+   **Google Drive**: en el formulario se elige el tipo "Google Drive" y se toca
+   "Iniciar sesión con Google". La app lanza `rclone authorize drive`
+   (`scripts/drive_auth.sh`, con root) y abre la URL en el navegador del
+   teléfono; Google redirige a `127.0.0.1:53682`, donde escucha rclone en el
+   propio dispositivo, y el token queda guardado en la sección del remoto
+   (`type = drive`, `scope`, `token`). No hace falta un PC. Opciones: solo
+   lectura (`drive.readonly`), carpeta raíz o unidad compartida, Client
+   ID/Secret propios y pegar un token generado en un PC. Al guardar se lista
+   la raíz de Drive (`scripts/check_remote.sh`) para confirmar que la
+   sesión, la red, el DNS y los certificados funcionan. El cliente OAuth
+   de Google lo trae la app (se inyecta al compilar desde los secrets
+   `GDRIVE_CLIENT_ID` y `GDRIVE_CLIENT_SECRET` de GitHub Actions, o desde
+   `gdriveClientId` / `gdriveClientSecret` en `gradle.properties` local; nunca
+   en el repo): el usuario solo da su consentimiento. Sin secrets se usa el
+   cliente compartido de rclone. En "Opciones avanzadas" cada usuario puede
+   poner el suyo. Para crear el cliente: Google Cloud Console, proyecto con la
+   API de Drive habilitada, cliente OAuth tipo "Aplicación de escritorio" y
+   pantalla de consentimiento publicada "En producción" (en "Testing" el token
+   caduca a los 7 días). Sin verificación de Google, el scope `drive`
+   (restringido) permite hasta 100 usuarios nuevos y muestra la pantalla
+   "app no verificada".
 3. `scripts/mount.sh` monta el servidor seleccionado con `rclone mount --daemon` en un punto
    temporal y luego hace `mount --bind` hacia la carpeta de destino
    (`module/config/target_path`, editable desde **Inicio**; por defecto
@@ -37,6 +58,12 @@ module/    Módulo KernelSU (scripts de montaje + binario rclone)
 4. `scripts/unmount.sh` revierte ambos montajes, usando la ruta que quedó
    realmente montada (guardada en `status.json`) por si el usuario cambió
    la carpeta de destino después de montar sin haber vuelto a montar.
+   Los scripts comparten `scripts/env.sh` (HOME, PATH y `SSL_CERT_DIR` con los
+   certificados de Android; sin eso el rclone estático no valida HTTPS). Para
+   Drive, `mount.sh` usa `--vfs-cache-mode full` (caché acotada a 1 GB) y el
+   módulo agrega `system/etc/resolv.conf` (rclone resuelve DNS leyéndolo y
+   Android no lo trae): tras flashear por primera vez hay que **reiniciar**.
+   Si el dispositivo ya tiene uno, el módulo no lo pisa.
 5. `service.sh` remonta automáticamente al boot si el usuario activó
    "Montar al iniciar" desde la app.
 

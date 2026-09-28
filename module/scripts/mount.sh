@@ -28,19 +28,9 @@ RCLONE_MOUNTPOINT="/data/local/tmp/rclone_ftp"
 TARGET_PATH="$(cat "$MODDIR/config/target_path" 2>/dev/null)"
 [ -z "$TARGET_PATH" ] && TARGET_PATH="/sdcard/FTP"
 
-# Al correr como root vía su/servicio, $HOME suele venir vacío o en "/", y
-# rclone intenta entonces crear su vfs cache en "/.cache" — que cae en la
-# partición de sistema, de solo lectura ("mkdir /.cache: read-only file
-# system"). Fijamos HOME a un directorio propio y escribible del módulo, y
-# además pasamos --cache-dir explícito para no depender de HOME en absoluto.
-export HOME="$MODDIR"
+# HOME, PATH (fusermount3) y certificados TLS para rclone: ver env.sh.
+. "$MODDIR/scripts/env.sh"
 mkdir -p "$CACHE_DIR"
-
-# Android no trae fusermount3 (rclone lo necesita para montar FUSE incluso
-# corriendo como root: "fusermount3: executable file not found in $PATH").
-# Se agrega $MODDIR/bin (donde va el binario que empaqueta el módulo) al
-# PATH para que rclone lo encuentre.
-export PATH="$MODDIR/bin:$PATH"
 
 if [ ! -f "$RCLONE_CONF" ]; then
     echo "$(date): No hay rclone.conf, configura el FTP desde la app" >> "$LOG_FILE"
@@ -55,6 +45,41 @@ if ! grep -qxF "[$ACTIVE]" "$RCLONE_CONF"; then
     echo "$(date): No existe el servidor '$ACTIVE' en rclone.conf" >> "$LOG_FILE"
     exit 1
 fi
+
+# Tipo del remoto seleccionado (ftp, drive...): lee la clave "type" de su
+# sección. Se hace con "case" y no con sed para no depender de caracteres
+# especiales en el nombre.
+remote_type() {
+    in_section=0
+    while IFS= read -r line; do
+        case "$line" in
+            "[$1]") in_section=1 ;;
+            "["*"]") in_section=0 ;;
+            "type "*"="*|"type="*)
+                if [ "$in_section" = 1 ]; then
+                    v="${line#*=}"
+                    v="${v# }"
+                    echo "${v%% *}"
+                    return
+                fi
+                ;;
+        esac
+    done < "$RCLONE_CONF"
+}
+
+# Opciones de montaje según el tipo. Se dejan sin comillas al invocar rclone
+# para que se separen en palabras.
+case "$(remote_type "$ACTIVE")" in
+    drive)
+        # Drive no admite escritura parcial ni lecturas con salto sobre la
+        # nube: la caché completa en disco (acotada) hace que los archivos
+        # se comporten como locales para cualquier app.
+        MOUNT_OPTS="--vfs-cache-mode full --vfs-cache-max-size 1G --vfs-cache-max-age 1h"
+        ;;
+    *)
+        MOUNT_OPTS="--vfs-cache-mode writes"
+        ;;
+esac
 
 mkdir -p "$RCLONE_MOUNTPOINT"
 # Estado actual: el montaje FUSE de rclone y el bind sobre /sdcard/FTP son
@@ -120,7 +145,7 @@ fi
     --config "$RCLONE_CONF" \
     --cache-dir "$CACHE_DIR" \
     --allow-other \
-    --vfs-cache-mode writes \
+    $MOUNT_OPTS \
     --daemon \
     --log-file "$LOG_FILE" \
     --log-level INFO

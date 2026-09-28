@@ -19,6 +19,16 @@ if [ -d "$OLD_CONFIG" ]; then
     ui_print "- Configuración anterior conservada"
 fi
 
+# rclone (binario Go estático) resuelve DNS leyendo /etc/resolv.conf, que
+# Android no trae: sin él, Google Drive falla con "lookup ... on [::1]:53".
+# El módulo lo agrega de forma sistémica (system/etc/resolv.conf); si el
+# dispositivo ya tiene uno propio, no se pisa.
+if [ -f /system/etc/resolv.conf ]; then
+    rm -f "$MODPATH/system/etc/resolv.conf"
+else
+    ui_print "- DNS para rclone (Google Drive): requiere reiniciar"
+fi
+
 # Config por defecto: sin autostart hasta que el usuario lo active desde la app
 [ -f "$MODPATH/config/autostart" ] || echo "0" > "$MODPATH/config/autostart"
 
@@ -48,4 +58,4 @@ else
     ui_print "- AVISO: el zip no trae app.apk"
 fi
 
-ui_print "- Configura el remoto FTP desde la app antes de montar"
+ui_print "- Configura el servidor (FTP o Google Drive) desde la app antes de montar"

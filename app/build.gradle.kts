@@ -30,12 +30,25 @@ android {
         applicationId = "com.rclonebind.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
-        versionName = "0.5.0"
+        versionCode = 14
+        versionName = "0.7.0"
+
+        // Cliente OAuth de Google Drive que trae la app: el usuario solo da su
+        // consentimiento, sin pegar credenciales. Se inyecta en el build desde
+        // variables de entorno (secrets de GitHub Actions) o desde gradle.properties
+        // local (gdriveClientId / gdriveClientSecret); no se versiona en el repo.
+        // Vacío = se usa el cliente compartido de rclone (con cuota limitada).
+        fun oauthValue(env: String, prop: String): String =
+            (System.getenv(env)?.takeIf { it.isNotBlank() } ?: (project.findProperty(prop) as String?) ?: "")
+                .trim()
+                .filter { it.isLetterOrDigit() || it == '-' || it == '_' || it == '.' || it == '~' }
+        buildConfigField("String", "GDRIVE_CLIENT_ID", "\"${oauthValue("GDRIVE_CLIENT_ID", "gdriveClientId")}\"")
+        buildConfigField("String", "GDRIVE_CLIENT_SECRET", "\"${oauthValue("GDRIVE_CLIENT_SECRET", "gdriveClientSecret")}\"")
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

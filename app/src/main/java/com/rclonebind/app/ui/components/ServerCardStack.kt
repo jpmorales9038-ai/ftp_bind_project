@@ -32,7 +32,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.rclonebind.app.root.FtpProfile
+import com.rclonebind.app.root.RemoteProfile
+import com.rclonebind.app.root.RemoteType
 import com.rclonebind.app.ui.theme.AppMotion
 
 // Parte visible de una tarjeta cerrada, y cuánto se mete bajo la siguiente
@@ -48,11 +49,11 @@ private val OpenHeight = 216.dp
  */
 @Composable
 fun ServerCardStack(
-    profiles: List<FtpProfile>,
+    profiles: List<RemoteProfile>,
     selected: String?,
     onSelect: (String) -> Unit,
-    onEdit: (FtpProfile) -> Unit,
-    onDelete: (FtpProfile) -> Unit,
+    onEdit: (RemoteProfile) -> Unit,
+    onDelete: (RemoteProfile) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val tops = ArrayList<Dp>()
@@ -87,7 +88,7 @@ fun ServerCardStack(
 
 @Composable
 private fun StackCard(
-    profile: FtpProfile,
+    profile: RemoteProfile,
     index: Int,
     isSelected: Boolean,
     top: Dp,
@@ -134,7 +135,11 @@ private fun StackCard(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = if (profile.user.isEmpty()) profile.host else "${profile.user}@${profile.host}",
+                text = when {
+                    profile.type == RemoteType.DRIVE -> RemoteType.DRIVE.label
+                    profile.user.isEmpty() -> profile.host
+                    else -> "${profile.user}@${profile.host}"
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = LocalContentColor.current.copy(alpha = 0.8f),
                 maxLines = 1,
@@ -143,11 +148,23 @@ private fun StackCard(
             AnimatedVisibility(visible = isSelected) {
                 Column {
                     Spacer(Modifier.height(12.dp))
-                    Text("Puerto ${profile.port}", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        if (profile.hasPassword) "Contraseña guardada" else "Sin contraseña",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    if (profile.type == RemoteType.DRIVE) {
+                        val drive = profile.drive
+                        Text(
+                            if (drive?.hasToken == true) "Sesión de Google guardada" else "Sin sesión",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            if (drive?.readOnly == true) "Solo lectura" else "Lectura y escritura",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    } else {
+                        Text("Puerto ${profile.port}", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (profile.hasPassword) "Contraseña guardada" else "Sin contraseña",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                     Spacer(Modifier.height(4.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         val colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current)

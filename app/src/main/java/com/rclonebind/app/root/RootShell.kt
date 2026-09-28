@@ -16,6 +16,8 @@ object ModulePaths {
     const val TARGET_PATH_FILE = "$CONFIG_DIR/target_path"
     const val STATUS_FILE = "$BASE/status.json"
     const val LOG_FILE = "$BASE/mount.log"
+    /** Salida temporal de `rclone authorize` (contiene el token: se borra al terminar). */
+    const val AUTH_OUT = "$BASE/auth.out"
 }
 
 /**
@@ -57,7 +59,7 @@ object RootShell {
                 "mv ${ModulePaths.RCLONE_CONF}.tmp ${ModulePaths.RCLONE_CONF}"
         )
 
-    fun loadProfiles(): List<FtpProfile> = readConf().toProfiles()
+    fun loadProfiles(): List<RemoteProfile> = readConf().toProfiles()
 
     /**
      * Crea el servidor, o lo edita si [original] no es null (con [name]
@@ -105,6 +107,11 @@ object RootShell {
             }
         }
 
+        return writeConf(putSection(conf, original, name, section))
+    }
+
+    /** Coloca [section] como [name]: reemplaza a [original] (renombrado) o se agrega al final. */
+    private fun putSection(conf: Conf, original: String?, name: String, section: LinkedHashMap<String, String>): Conf {
         val out = Conf()
         var placed = false
         for ((k, v) in conf) {
@@ -116,7 +123,43 @@ object RootShell {
             }
         }
         if (!placed) out[name] = section
-        return writeConf(out)
+        return out
+    }
+
+    // Claves que la app administra en un remoto Drive; el resto de claves que
+    // el usuario haya puesto a mano (impersonate, export_formats...) se conservan.
+    private val DRIVE_MANAGED_KEYS =
+        setOf("type", "client_id", "client_secret", "scope", "token", "root_folder_id", "team_drive")
+
+    /**
+     * Crea o edita un remoto Google Drive. Con [token] null al editar se
+     * conserva la sesión que ya estaba guardada.
+     */
+    fun saveDriveProfile(original: String?, name: String, token: String?, options: DriveOptions): Result {
+        val conf = readConf()
+        if (name != original && conf.containsKey(name)) {
+            return Result(false, "Ya existe un servidor llamado $name")
+        }
+        val old = original?.let { conf[it] }
+        val finalToken = token ?: old?.get("token")
+        if (finalToken.isNullOrEmpty()) {
+            return Result(false, "Falta iniciar sesión con Google")
+        }
+
+        val section = LinkedHashMap<String, String>()
+        section["type"] = RemoteType.DRIVE.rclone
+        if (options.clientId.isNotEmpty()) section["client_id"] = options.clientId
+        if (options.clientSecret.isNotEmpty()) section["client_secret"] = options.clientSecret
+        section["scope"] = if (options.readOnly) DRIVE_SCOPE_READONLY else DRIVE_SCOPE_FULL
+        section["token"] = finalToken
+        if (options.rootFolderId.isNotEmpty()) section["root_folder_id"] = options.rootFolderId
+        if (options.teamDrive.isNotEmpty()) section["team_drive"] = options.teamDrive
+        if (old != null) {
+            for ((k, v) in old) {
+                if (k !in DRIVE_MANAGED_KEYS && !section.containsKey(k)) section[k] = v
+            }
+        }
+        return writeConf(putSection(conf, original, name, section))
     }
 
     fun deleteProfile(name: String): Result {
@@ -124,6 +167,29 @@ object RootShell {
         conf.remove(name)
         return writeConf(conf)
     }
+
+    // ---- Google Drive: login OAuth dentro del dispositivo ----
+
+    /**
+     * Lanza `rclone authorize drive` en segundo plano (scripts/drive_auth.sh).
+     * Vuelve enseguida; el progreso se lee con [driveAuthOutput]. Con
+     * [clientId] y [clientSecret] propios se usa ese cliente OAuth en vez del
+     * compartido de rclone.
+     */
+    fun driveAuthStart(clientId: String, clientSecret: String): Result {
+        val args = if (clientId.isNotEmpty() && clientSecret.isNotEmpty()) " ${sq(clientId)} ${sq(clientSecret)}" else ""
+        return run("nohup sh ${ModulePaths.SCRIPTS}/drive_auth.sh$args >/dev/null 2>&1 &")
+    }
+
+    fun driveAuthOutput(): String =
+        Shell.cmd("cat ${ModulePaths.AUTH_OUT} 2>/dev/null").exec().out.joinToString("\n")
+
+    /** Corta el login (si sigue vivo) y borra la salida temporal con el token. */
+    fun driveAuthStop(): Result =
+        run("pkill -f drive_auth.sh; pkill -f 'rclone authorize'; rm -f ${ModulePaths.AUTH_OUT}")
+
+    /** Lista la raíz del remoto para confirmar que la sesión y la red funcionan. */
+    fun checkRemote(name: String): Result = run("sh ${ModulePaths.SCRIPTS}/check_remote.sh ${sq(name)}")
 
     fun readActive(): String? =
         Shell.cmd("cat ${ModulePaths.ACTIVE_FILE} 2>/dev/null").exec().out

@@ -5,6 +5,10 @@ while [ "$(getprop sys.boot_completed)" != "1" ]; do
     sleep 1
 done
 
+# Salida temporal del login de Google Drive: contiene un token y no debe
+# quedar en disco si la app se cerró a medias.
+rm -f "$MODDIR/auth.out"
+
 # Si customize.sh no pudo instalar al flashear (dejó .needs_manual_install),
 # se reintenta ahora que el sistema ya arrancó; si sigue fallando, se abre el
 # instalador del sistema y basta un toque en "Instalar".

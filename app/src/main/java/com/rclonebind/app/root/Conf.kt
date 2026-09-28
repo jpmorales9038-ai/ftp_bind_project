@@ -1,12 +1,34 @@
 package com.rclonebind.app.root
 
-/** Un servidor FTP guardado. La contraseña nunca sale del rclone.conf. */
-data class FtpProfile(
+/** Tipos de remoto que la app sabe crear (el valor de "type" en rclone.conf). */
+enum class RemoteType(val rclone: String, val label: String) {
+    FTP("ftp", "FTP"),
+    DRIVE("drive", "Google Drive")
+}
+
+/** Ajustes propios de un remoto Google Drive. El token nunca sale del rclone.conf. */
+data class DriveOptions(
+    val clientId: String = "",
+    val clientSecret: String = "",
+    val readOnly: Boolean = false,
+    val rootFolderId: String = "",
+    val teamDrive: String = "",
+    val hasToken: Boolean = false
+)
+
+/**
+ * Un servidor guardado (FTP o Google Drive). Los campos host/port/user/
+ * hasPassword solo aplican a FTP; [drive] solo a Google Drive. Las
+ * contraseñas y el token de sesión nunca salen del rclone.conf.
+ */
+data class RemoteProfile(
     val name: String,
-    val host: String,
-    val port: String,
-    val user: String,
-    val hasPassword: Boolean
+    val type: RemoteType,
+    val host: String = "",
+    val port: String = "21",
+    val user: String = "",
+    val hasPassword: Boolean = false,
+    val drive: DriveOptions? = null
 )
 
 /** rclone.conf en memoria: sección -> (clave -> valor), conservando el orden. */
@@ -38,18 +60,38 @@ fun serializeConf(conf: Conf): String =
         "[${entry.key}]\n" + entry.value.entries.joinToString("\n") { "${it.key} = ${it.value}" }
     } + "\n"
 
-fun Conf.toProfiles(): List<FtpProfile> =
-    entries
-        .filter { it.value["type"] == "ftp" }
-        .map { entry ->
-            FtpProfile(
+fun Conf.toProfiles(): List<RemoteProfile> =
+    entries.mapNotNull { entry ->
+        val v = entry.value
+        when (v["type"]) {
+            RemoteType.FTP.rclone -> RemoteProfile(
                 name = entry.key,
-                host = entry.value["host"].orEmpty(),
-                port = entry.value["port"] ?: "21",
-                user = entry.value["user"].orEmpty(),
-                hasPassword = !entry.value["pass"].isNullOrEmpty()
+                type = RemoteType.FTP,
+                host = v["host"].orEmpty(),
+                port = v["port"] ?: "21",
+                user = v["user"].orEmpty(),
+                hasPassword = !v["pass"].isNullOrEmpty()
             )
+            RemoteType.DRIVE.rclone -> RemoteProfile(
+                name = entry.key,
+                type = RemoteType.DRIVE,
+                drive = DriveOptions(
+                    clientId = v["client_id"].orEmpty(),
+                    clientSecret = v["client_secret"].orEmpty(),
+                    readOnly = v["scope"] == DRIVE_SCOPE_READONLY,
+                    rootFolderId = v["root_folder_id"].orEmpty(),
+                    teamDrive = v["team_drive"].orEmpty(),
+                    hasToken = !v["token"].isNullOrEmpty()
+                )
+            )
+            // Otros tipos (sftp, s3...) que el usuario haya puesto a mano se
+            // conservan en el archivo pero no se muestran en la app.
+            else -> null
         }
+    }
+
+const val DRIVE_SCOPE_FULL = "drive"
+const val DRIVE_SCOPE_READONLY = "drive.readonly"
 
 /**
  * Es muy fácil pegar la dirección completa ("ftp://192.168.1.75") en el campo

@@ -5,18 +5,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.os.SystemClock
 import com.rclonebind.app.root.DEFAULT_TARGET_PATH
-import com.rclonebind.app.root.FtpProfile
+import com.rclonebind.app.root.DriveAuthParser
+import com.rclonebind.app.root.DriveAuthState
+import com.rclonebind.app.root.DriveOptions
+import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RootShell
 import com.rclonebind.app.root.cleanHost
 import com.rclonebind.app.root.cleanTargetPath
 import com.rclonebind.app.root.validateTargetPath
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private class Snapshot(
-    val profiles: List<FtpProfile>,
+    val profiles: List<RemoteProfile>,
     val active: String?,
     val status: String,
     val autostart: Boolean,
@@ -36,7 +44,7 @@ class BindViewModel : ViewModel() {
         private set
     var rootGranted by mutableStateOf<Boolean?>(null)
         private set
-    var profiles by mutableStateOf<List<FtpProfile>>(emptyList())
+    var profiles by mutableStateOf<List<RemoteProfile>>(emptyList())
         private set
     /** Ruta donde queda visible el bind (editable desde Inicio). */
     var targetPath by mutableStateOf(DEFAULT_TARGET_PATH)
@@ -45,6 +53,9 @@ class BindViewModel : ViewModel() {
     var activeName by mutableStateOf<String?>(null)
         private set
     var busy by mutableStateOf(false)
+        private set
+    /** Progreso del inicio de sesión con Google (lo muestra el formulario de servidor). */
+    var driveAuth by mutableStateOf<DriveAuthState>(DriveAuthState.Idle)
         private set
     /** Mensaje de una sola vez; la UI lo muestra en un snackbar y lo consume. */
     var message by mutableStateOf<String?>(null)
@@ -116,6 +127,98 @@ class BindViewModel : ViewModel() {
         reload()
     }
 
+    fun saveDriveProfile(
+        original: String?,
+        name: String,
+        token: String?,
+        options: DriveOptions
+    ) = viewModelScope.launch {
+        val cleanName = name.trim()
+        val wasActive = original != null && original == activeName
+        val result = withContext(Dispatchers.IO) {
+            val r = RootShell.saveDriveProfile(original, cleanName, token, options)
+            if (r.success && (original == null || wasActive)) RootShell.setActive(cleanName)
+            r
+        }
+        if (!result.success) {
+            message = "Error al guardar: ${result.output.take(200)}"
+            reload()
+            return@launch
+        }
+        message = "Servidor guardado"
+        reload()
+
+        // Comprobación real contra Google (sesión, red, DNS, certificados):
+        // así un fallo se ve ahora y no recién al intentar montar.
+        val check = withContext(Dispatchers.IO) { RootShell.checkRemote(cleanName) }
+        message = if (check.success) {
+            "Google Drive conectado"
+        } else {
+            val detail = check.output.lines().lastOrNull { it.isNotBlank() }?.take(200)
+                ?: "sin respuesta (sin red o tiempo agotado)"
+            "Guardado, pero no se pudo conectar: $detail"
+        }
+    }
+
+    private var authJob: Job? = null
+
+    /**
+     * Inicia el login con Google: lanza `rclone authorize` con root, espera la
+     * URL (el formulario la abre en el navegador) y luego el token. Si el
+     * usuario cancela o cierra el formulario, [cancelDriveLogin] detiene todo.
+     */
+    fun startDriveLogin(clientId: String, clientSecret: String) {
+        authJob?.cancel()
+        authJob = viewModelScope.launch {
+            driveAuth = DriveAuthState.Starting
+            try {
+                val started = withContext(Dispatchers.IO) { RootShell.driveAuthStart(clientId, clientSecret) }
+                if (!started.success) {
+                    driveAuth = DriveAuthState.Failed("No se pudo iniciar rclone: ${started.output.takeLast(200)}")
+                    return@launch
+                }
+                val deadline = SystemClock.elapsedRealtime() + AUTH_TIMEOUT_MS
+                while (isActive) {
+                    delay(AUTH_POLL_MS)
+                    val output = withContext(Dispatchers.IO) { RootShell.driveAuthOutput() }
+                    val progress = DriveAuthParser.parse(output)
+
+                    val token = progress.token
+                    if (token != null) {
+                        driveAuth = DriveAuthState.Success(token)
+                        return@launch
+                    }
+                    if (progress.exitCode != null) {
+                        driveAuth = DriveAuthState.Failed(progress.error ?: "El inicio de sesión terminó sin resultado")
+                        return@launch
+                    }
+                    val url = progress.url
+                    if (url != null && driveAuth !is DriveAuthState.WaitingBrowser) {
+                        driveAuth = DriveAuthState.WaitingBrowser(url)
+                    }
+                    if (SystemClock.elapsedRealtime() > deadline) {
+                        driveAuth = DriveAuthState.Failed("Tiempo agotado esperando la autorización")
+                        return@launch
+                    }
+                }
+            } finally {
+                // Siempre: mata rclone si sigue vivo y borra auth.out (lleva el token).
+                withContext(NonCancellable + Dispatchers.IO) { RootShell.driveAuthStop() }
+            }
+        }
+    }
+
+    fun cancelDriveLogin() {
+        authJob?.cancel()
+        authJob = null
+        driveAuth = DriveAuthState.Idle
+    }
+
+    override fun onCleared() {
+        authJob?.cancel()
+        super.onCleared()
+    }
+
     fun deleteProfile(name: String) = viewModelScope.launch {
         val result = withContext(Dispatchers.IO) { RootShell.deleteProfile(name) }
         message = if (result.success) "Servidor eliminado" else "Error al eliminar: ${result.output.take(200)}"
@@ -172,5 +275,11 @@ class BindViewModel : ViewModel() {
     fun refreshLogs() = viewModelScope.launch {
         val result = withContext(Dispatchers.IO) { RootShell.tailLog() }
         logs = result.output
+    }
+
+    private companion object {
+        const val AUTH_POLL_MS = 600L
+        // El script corta a los 300 s; esto es solo la red de seguridad de la app.
+        const val AUTH_TIMEOUT_MS = 330_000L
     }
 }

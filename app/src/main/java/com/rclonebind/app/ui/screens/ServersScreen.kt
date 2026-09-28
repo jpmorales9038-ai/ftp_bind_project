@@ -24,7 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
-import com.rclonebind.app.root.FtpProfile
+import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.ui.components.ScreenContainer
 import com.rclonebind.app.ui.components.ServerCardStack
 import com.rclonebind.app.ui.components.ServerSheet
@@ -34,8 +34,8 @@ fun ServersScreen(vm: BindViewModel) {
     LaunchedEffect(Unit) { vm.refreshAll() }
 
     var showSheet by remember { mutableStateOf(false) }
-    var editTarget by remember { mutableStateOf<FtpProfile?>(null) }
-    var deleteTarget by remember { mutableStateOf<FtpProfile?>(null) }
+    var editTarget by remember { mutableStateOf<RemoteProfile?>(null) }
+    var deleteTarget by remember { mutableStateOf<RemoteProfile?>(null) }
 
     val openNew = {
         editTarget = null
@@ -48,7 +48,7 @@ fun ServersScreen(vm: BindViewModel) {
 
             if (vm.profiles.isEmpty()) {
                 Text(
-                    "Todavía no hay servidores guardados. Agrega uno para montarlo como carpeta en tu almacenamiento.",
+                    "Todavía no hay servidores guardados. Agrega un servidor FTP o tu Google Drive para montarlo como carpeta en tu almacenamiento.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -88,11 +88,24 @@ fun ServersScreen(vm: BindViewModel) {
         ServerSheet(
             initial = editTarget,
             existingNames = vm.profiles.map { it.name },
-            onSave = { name, host, port, user, pass ->
+            driveAuth = vm.driveAuth,
+            onDriveLogin = { clientId, clientSecret -> vm.startDriveLogin(clientId, clientSecret) },
+            onDriveCancel = { vm.cancelDriveLogin() },
+            onSaveFtp = { name, host, port, user, pass ->
                 vm.saveProfile(editTarget?.name, name, host, port, user, pass)
+                vm.cancelDriveLogin()
                 showSheet = false
             },
-            onDismiss = { showSheet = false }
+            onSaveDrive = { name, token, options ->
+                vm.saveDriveProfile(editTarget?.name, name, token, options)
+                vm.cancelDriveLogin()
+                showSheet = false
+            },
+            onDismiss = {
+                // Cerrar el formulario a mitad del login corta rclone y borra el token temporal.
+                vm.cancelDriveLogin()
+                showSheet = false
+            }
         )
     }
 
