@@ -21,4 +21,9 @@ BEFORE_KB=$(du -sk "$CACHE_DIR" 2>/dev/null | awk '{print $1}')
 rm -rf "${CACHE_DIR:?}"/* 2>/dev/null
 mkdir -p "$CACHE_DIR"
 
+# La caché quedó vacía: ninguna marca de "precarga completa" (preload.sh)
+# sigue siendo válida. Si no se borran, el próximo montaje creería que ya
+# está todo precargado y no bajaría nada.
+rm -f "$MODDIR/config"/preload_done_* 2>/dev/null
+
 echo "OK $BEFORE_KB"

@@ -39,8 +39,8 @@ compute_mount_opts() {
     #  - multi-thread-streams/cutoff: los archivos de más de 64M se bajan a la
     #    caché en 4 conexiones paralelas en vez de una sola (si el remoto lo
     #    admite; si no, rclone sigue con una sola conexión sin fallar).
-    #  - transfers/checkers: más operaciones de archivo a la vez (sube el
-    #    doble los valores por defecto de rclone, 4 y 8).
+    #  - transfers/checkers: más operaciones de archivo a la vez (los valores
+    #    por defecto de rclone son 4 y 8; aquí se triplican).
     #  - vfs-write-back: espera más antes de subir un archivo recién escrito,
     #    para juntar varias escrituras seguidas al mismo archivo en una sola
     #    subida en vez de una por cada una.
@@ -48,7 +48,11 @@ compute_mount_opts() {
     #    fingerprint más caro de calcular; listados y comparaciones más
     #    ágiles, a costa de no notar por su contenido un archivo modificado
     #    fuera de la app que conserve el mismo tamaño.
-    MAX_EXTRA_OPTS="--multi-thread-streams 4 --multi-thread-cutoff 64M --transfers 8 --checkers 16 --vfs-write-back 15s --vfs-fast-fingerprint"
+    #  - attr-timeout: un juego suele preguntar el tamaño de un archivo antes
+    #    de cada lectura; con esto la respuesta sale de la memoria del propio
+    #    montaje en vez de ir hasta el remoto cada vez. Seguro aquí porque
+    #    nada más escribe en el remoto mientras está montado.
+    MAX_EXTRA_OPTS="--multi-thread-streams 4 --multi-thread-cutoff 64M --transfers 12 --checkers 24 --vfs-write-back 15s --vfs-fast-fingerprint --attr-timeout 1h"
 
     # Opciones de montaje según el perfil y el tipo de remoto. Se dejan sin
     # comillas al invocar rclone para que se separen en palabras.
@@ -58,7 +62,16 @@ compute_mount_opts() {
     #    caché. FTP no avisa de cambios, por eso su dir-cache-time es corto.
     case "$PERF:$(remote_type "$ACTIVE")" in
         max:drive)
-            MOUNT_OPTS="--vfs-cache-mode full --vfs-cache-max-size ${CACHE_GB:-10}G --vfs-cache-max-age 24h --vfs-cache-min-free-space 2G --vfs-read-ahead 256M --vfs-read-chunk-size 64M --vfs-read-chunk-streams 4 --buffer-size 64M --dir-cache-time 12h --drive-chunk-size 64M $MAX_EXTRA_OPTS"
+            # --vfs-read-chunk-streams baja varios trozos del MISMO archivo en
+            # paralelo (a diferencia de --multi-thread-streams, que solo entra
+            # en juego para archivos de más de 64M): es lo que más ayuda a que
+            # un juego con muchos archivos medianos (assets de 5-60M, típico
+            # en Unity/Unreal) cargue rápido incluso con lecturas salteadas.
+            # 6 streams de 32M (192M en vuelo por archivo abierto) rinde mejor
+            # que menos streams más grandes en Drive, a costa de más conexiones
+            # y RAM simultáneas: si el teléfono tiene poca RAM libre o el juego
+            # abre muchos archivos a la vez, conviene bajarlo (por ejemplo a 4).
+            MOUNT_OPTS="--vfs-cache-mode full --vfs-cache-max-size ${CACHE_GB:-10}G --vfs-cache-max-age 24h --vfs-cache-min-free-space 2G --vfs-read-ahead 256M --vfs-read-chunk-size 32M --vfs-read-chunk-streams 6 --buffer-size 64M --dir-cache-time 12h --drive-chunk-size 64M $MAX_EXTRA_OPTS"
             ;;
         max:*)
             MOUNT_OPTS="--vfs-cache-mode full --vfs-cache-max-size ${CACHE_GB:-10}G --vfs-cache-max-age 12h --vfs-cache-min-free-space 2G --vfs-read-ahead 128M --buffer-size 32M --dir-cache-time 10m $MAX_EXTRA_OPTS"
