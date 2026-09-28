@@ -11,6 +11,14 @@ chmod 755 "$MODPATH/scripts/"*.sh
 chmod 755 "$MODPATH/service.sh"
 chmod 755 "$MODPATH/post-fs-data.sh"
 
+# Al actualizar, KernelSU arma el módulo nuevo en otra carpeta: sin esto se
+# pierden los servidores, el servidor activo y el ajuste de autostart.
+OLD_CONFIG="/data/adb/modules/rclone_ftp_bind/config"
+if [ -d "$OLD_CONFIG" ]; then
+    cp -a "$OLD_CONFIG/." "$MODPATH/config/"
+    ui_print "- Configuración anterior conservada"
+fi
+
 # Config por defecto: sin autostart hasta que el usuario lo active desde la app
 [ -f "$MODPATH/config/autostart" ] || echo "0" > "$MODPATH/config/autostart"
 

@@ -57,10 +57,27 @@ fi
 mkdir -p "$RCLONE_MOUNTPOINT"
 mkdir -p "$TARGET_PATH"
 
-# Ya montado, no hacer nada
-if mount | grep -q "$RCLONE_MOUNTPOINT"; then
-    echo "$(date): Ya estaba montado" >> "$LOG_FILE"
-    exit 0
+# Estado actual: el montaje FUSE de rclone y el bind sobre /sdcard/FTP son
+# dos cosas distintas. Si un intento anterior dejó el FUSE pero no el bind,
+# solo hay que completar el bind (antes salía con "Ya estaba montado" sin
+# hacerlo, y el bind nunca aparecía).
+is_fuse_mounted() { grep -q " $RCLONE_MOUNTPOINT " /proc/mounts; }
+is_bound() { grep -q " $TARGET_PATH " /proc/mounts; }
+
+do_bind() {
+    is_bound || mount --bind "$RCLONE_MOUNTPOINT" "$TARGET_PATH"
+    if is_bound; then
+        echo "{\"mounted\":true,\"remote\":\"$ACTIVE\"}" > "$STATUS_FILE"
+        echo "$(date): '$ACTIVE' montado correctamente en $TARGET_PATH" >> "$LOG_FILE"
+        exit 0
+    fi
+    echo '{"mounted":false}' > "$STATUS_FILE"
+    echo "$(date): Falló el bind hacia $TARGET_PATH" >> "$LOG_FILE"
+    exit 1
+}
+
+if is_fuse_mounted; then
+    do_bind
 fi
 
 "$RCLONE_BIN" mount "$ACTIVE:" "$RCLONE_MOUNTPOINT" \
@@ -74,10 +91,8 @@ fi
 
 sleep 2
 
-if mount | grep -q "$RCLONE_MOUNTPOINT"; then
-    mount --bind "$RCLONE_MOUNTPOINT" "$TARGET_PATH"
-    echo "{\"mounted\":true,\"remote\":\"$ACTIVE\"}" > "$STATUS_FILE"
-    echo "$(date): '$ACTIVE' montado correctamente en $TARGET_PATH" >> "$LOG_FILE"
+if is_fuse_mounted; then
+    do_bind
 else
     echo '{"mounted":false}' > "$STATUS_FILE"
     echo "$(date): Fallo al montar rclone" >> "$LOG_FILE"

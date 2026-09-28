@@ -29,5 +29,22 @@ fi
 AUTOSTART_FLAG="$MODDIR/config/autostart"
 
 if [ -f "$AUTOSTART_FLAG" ] && [ "$(cat "$AUTOSTART_FLAG")" = "1" ]; then
-    sh "$MODDIR/scripts/mount.sh"
+    # En segundo plano y con reintentos: al arrancar, boot_completed llega
+    # antes de que el almacenamiento esté desbloqueado (/sdcard todavía no
+    # existe, y un bind hecho ahí queda tapado cuando se monta de verdad) y
+    # antes de que haya red, así que el primer intento suele fallar.
+    (
+        i=0
+        until [ -d /sdcard/Android ] || [ "$i" -ge 150 ]; do
+            sleep 2
+            i=$((i + 1))
+        done
+
+        n=0
+        while [ "$n" -lt 30 ]; do
+            sh "$MODDIR/scripts/mount.sh" && break
+            n=$((n + 1))
+            sleep 10
+        done
+    ) &
 fi
