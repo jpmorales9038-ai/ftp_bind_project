@@ -93,6 +93,12 @@ sequenceDiagram
 - Cambiar de servidor con uno ya montado se hace con un solo botón.
 - Caché de disco acotada para Drive.
 - **Rendimiento** Equilibrado o Máximo: el modo Máximo usa caché completa también en FTP, lectura anticipada, descargas en paralelo y listados cacheados más tiempo. El **tamaño de caché** es configurable (1 a 50 GB) y se dejan 2 GB libres.
+  El botón **Probar rendimiento** abre una hoja con la prueba (`scripts/perf_test.sh`, con root): comprueba
+  que las opciones con las que corre rclone son las de la configuración actual (avisa si cambiaste el perfil o la
+  caché sin volver a montar), que hay espacio para la caché, que el listado funciona, y mide escritura y lectura
+  (un trozo al azar de un archivo grande, leído dos veces, viendo si la caché en disco crece). Escribe un archivo
+  temporal de 32 MB en la carpeta montada y lo borra. Guarda la última velocidad por perfil y tipo de servidor:
+  probando una vez en Equilibrado y otra en Máximo se pueden comparar.
 
 ### Instalación y actualizaciones sin fricción
 

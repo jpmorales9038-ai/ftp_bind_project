@@ -4,9 +4,11 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -15,6 +17,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
@@ -41,6 +44,7 @@ import com.rclonebind.app.root.PerfMode
 import com.rclonebind.app.root.defaultCacheGb
 import com.rclonebind.app.ui.components.FolderPickerDialog
 import com.rclonebind.app.ui.components.OptionTile
+import com.rclonebind.app.ui.components.PerfTestSheet
 import com.rclonebind.app.ui.components.ScreenContainer
 import com.rclonebind.app.ui.components.SectionCard
 import com.rclonebind.app.ui.theme.AppMotion
@@ -55,6 +59,7 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
     val mounted = vm.isMounted
     val active = vm.activeName
     var showPathDialog by remember { mutableStateOf(false) }
+    var showPerfTest by remember { mutableStateOf(false) }
     val heroColor by animateColorAsState(
         if (mounted) scheme.primaryContainer else scheme.surfaceContainerHigh,
         AppMotion.effects(), label = "heroColor"
@@ -246,7 +251,32 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
             if (custom != null) {
                 TextButton(onClick = { vm.setCacheGb(null) }) { Text("Restablecer tamaño automático") }
             }
+
+            FilledTonalButton(
+                onClick = {
+                    showPerfTest = true
+                    vm.startPerfTest()
+                },
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth().height(56.dp)
+            ) {
+                Icon(AppIcons.Bolt, contentDescription = null)
+                Spacer(Modifier.width(10.dp))
+                Text("Probar rendimiento", style = MaterialTheme.typography.titleMedium)
+            }
         }
+    }
+
+    if (showPerfTest) {
+        PerfTestSheet(
+            state = vm.perfTest,
+            onRun = { vm.startPerfTest() },
+            onDismiss = {
+                // Cerrar la hoja a mitad de la prueba la corta y borra el archivo temporal.
+                vm.cancelPerfTest()
+                showPerfTest = false
+            }
+        )
     }
 
     if (showPathDialog) {

@@ -20,6 +20,8 @@ object ModulePaths {
     const val LOG_FILE = "$BASE/mount.log"
     /** Salida temporal de `rclone authorize` (contiene el token: se borra al terminar). */
     const val AUTH_OUT = "$BASE/auth.out"
+    /** Progreso de la prueba de rendimiento (lo escribe scripts/perf_test.sh). */
+    const val PERF_OUT = "$BASE/perf_test.out"
 }
 
 /**
@@ -238,6 +240,23 @@ object RootShell {
     fun setCacheGb(gb: Int?): Result =
         if (gb == null) run("rm -f ${ModulePaths.CACHE_GB_FILE}")
         else run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' $gb > ${ModulePaths.CACHE_GB_FILE}")
+
+    // ---- Prueba de rendimiento ----
+
+    /**
+     * Lanza scripts/perf_test.sh en segundo plano. Vuelve enseguida; el
+     * progreso se lee con [perfTestOutput]. Borra la salida anterior primero
+     * para no leer los resultados de una prueba vieja.
+     */
+    fun perfTestStart(): Result =
+        run("rm -f ${ModulePaths.PERF_OUT}; nohup sh ${ModulePaths.SCRIPTS}/perf_test.sh >/dev/null 2>&1 &")
+
+    fun perfTestOutput(): String =
+        Shell.cmd("cat ${ModulePaths.PERF_OUT} 2>/dev/null").exec().out.joinToString("\n")
+
+    /** Corta la prueba si sigue viva (el script borra su archivo temporal al recibir la señal). */
+    fun perfTestStop(): Result =
+        run("pkill -f perf_test.sh; rm -f ${ModulePaths.PERF_OUT}")
 
     fun readAutostart(): Boolean =
         Shell.cmd("cat ${ModulePaths.CONFIG_DIR}/autostart 2>/dev/null").exec().out
