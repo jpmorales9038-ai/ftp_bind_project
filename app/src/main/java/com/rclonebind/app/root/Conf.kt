@@ -79,6 +79,9 @@ fun validateProfileName(name: String, original: String?, existing: List<String>)
 /** Ruta de destino del bind cuando el usuario todavía no configuró una propia. */
 const val DEFAULT_TARGET_PATH = "/sdcard/FTP"
 
+/** Raíz del almacenamiento interno desde donde se elige la carpeta de destino. */
+const val STORAGE_ROOT = "/sdcard"
+
 /** Quita espacios y la barra final (salvo que la ruta sea solo "/"). */
 fun cleanTargetPath(raw: String): String {
     val trimmed = raw.trim()

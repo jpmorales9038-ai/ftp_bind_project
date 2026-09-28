@@ -146,5 +146,15 @@ object RootShell {
     fun setAutostart(enabled: Boolean): Result =
         run("mkdir -p ${ModulePaths.CONFIG_DIR} && echo '${if (enabled) "1" else "0"}' > ${ModulePaths.CONFIG_DIR}/autostart")
 
+    /** Subcarpetas (sin ocultas) de [path], ordenadas. Se lista con root para no depender de permisos de almacenamiento. */
+    fun listDirs(path: String): List<String> =
+        Shell.cmd("ls -1p ${sq(path)} 2>/dev/null").exec().out
+            .filter { it.endsWith("/") }
+            .map { it.removeSuffix("/") }
+            .filter { it.isNotEmpty() && !it.startsWith(".") }
+            .sortedBy { it.lowercase() }
+
+    fun makeDir(path: String): Result = run("mkdir -p ${sq(path)}")
+
     data class Result(val success: Boolean, val output: String)
 }

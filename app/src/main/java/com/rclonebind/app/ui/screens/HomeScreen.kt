@@ -4,17 +4,14 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -29,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
+import com.rclonebind.app.ui.components.FolderPickerDialog
 import com.rclonebind.app.ui.components.ScreenContainer
 import com.rclonebind.app.ui.theme.AppMotion
 
@@ -40,7 +38,6 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
     val mounted = vm.isMounted
     val active = vm.activeName
     var showPathDialog by remember { mutableStateOf(false) }
-    var pathInput by remember { mutableStateOf(vm.targetPath) }
     val heroColor by animateColorAsState(
         if (mounted) scheme.primaryContainer else scheme.surfaceContainerHigh,
         AppMotion.effects(), label = "heroColor"
@@ -179,47 +176,21 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                     )
                     Text(vm.targetPath, style = MaterialTheme.typography.titleMedium)
                 }
-                TextButton(onClick = {
-                    pathInput = vm.targetPath
-                    showPathDialog = true
-                }) {
-                    Text("Editar")
+                TextButton(onClick = { showPathDialog = true }) {
+                    Text("Cambiar")
                 }
             }
         }
     }
 
     if (showPathDialog) {
-        AlertDialog(
-            onDismissRequest = { showPathDialog = false },
-            title = { Text("Carpeta de destino") },
-            text = {
-                Column {
-                    Text(
-                        "Ruta donde se verá el bind del servidor montado.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = pathInput,
-                        onValueChange = { pathInput = it },
-                        singleLine = true,
-                        label = { Text("Ruta") },
-                        shape = MaterialTheme.shapes.large,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+        FolderPickerDialog(
+            initialPath = vm.targetPath,
+            onPick = {
+                vm.setTargetPath(it)
+                showPathDialog = false
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.setTargetPath(pathInput)
-                    showPathDialog = false
-                }) { Text("Guardar") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPathDialog = false }) { Text("Cancelar") }
-            }
+            onDismiss = { showPathDialog = false }
         )
     }
 }
