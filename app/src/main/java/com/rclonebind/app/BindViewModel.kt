@@ -54,6 +54,9 @@ class BindViewModel : ViewModel() {
         private set
     var busy by mutableStateOf(false)
         private set
+    /** true mientras dura un "deslizar para actualizar" (lo muestra el indicador). */
+    var refreshing by mutableStateOf(false)
+        private set
     /** Progreso del inicio de sesión con Google (lo muestra el formulario de servidor). */
     var driveAuth by mutableStateOf<DriveAuthState>(DriveAuthState.Idle)
         private set
@@ -70,6 +73,27 @@ class BindViewModel : ViewModel() {
     }
 
     fun refreshAll() = viewModelScope.launch { reload() }
+
+    /**
+     * Actualiza estado, servidores y log de una vez (gesto de deslizar hacia
+     * abajo). El indicador se mantiene un mínimo para que no parpadee cuando
+     * la lectura es instantánea.
+     */
+    fun pullRefresh() {
+        if (refreshing) return
+        viewModelScope.launch {
+            refreshing = true
+            try {
+                val started = SystemClock.elapsedRealtime()
+                reload()
+                logs = withContext(Dispatchers.IO) { RootShell.tailLog() }.output
+                val remaining = MIN_REFRESH_MS - (SystemClock.elapsedRealtime() - started)
+                if (remaining > 0) delay(remaining)
+            } finally {
+                refreshing = false
+            }
+        }
+    }
 
     private suspend fun reload() {
         val snap = withContext(Dispatchers.IO) {
@@ -285,6 +309,7 @@ class BindViewModel : ViewModel() {
 
     private companion object {
         const val AUTH_POLL_MS = 600L
+        const val MIN_REFRESH_MS = 500L
         // El script corta a los 300 s; esto es solo la red de seguridad de la app.
         const val AUTH_TIMEOUT_MS = 330_000L
     }

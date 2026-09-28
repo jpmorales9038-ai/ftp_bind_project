@@ -55,6 +55,8 @@ fun LogsScreen(vm: BindViewModel) {
     ScreenContainer(
         title = "Logs",
         scroll = false,
+        refreshing = vm.refreshing,
+        onRefresh = { vm.pullRefresh() },
         actions = {
             IconButton(onClick = { discardLogs() }, enabled = vm.logs.isNotBlank()) {
                 Icon(Icons.Default.Delete, contentDescription = "Borrar registro")

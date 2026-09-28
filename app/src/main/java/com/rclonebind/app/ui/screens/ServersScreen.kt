@@ -47,6 +47,8 @@ fun ServersScreen(vm: BindViewModel) {
     Box(Modifier.fillMaxSize()) {
         ScreenContainer(
             title = "Servidores",
+            refreshing = vm.refreshing,
+            onRefresh = { vm.pullRefresh() },
             actions = {
                 IconButton(onClick = openNew) {
                     Icon(Icons.Default.Add, contentDescription = "Agregar servidor")

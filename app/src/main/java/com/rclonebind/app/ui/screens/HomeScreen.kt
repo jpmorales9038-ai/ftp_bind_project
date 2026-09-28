@@ -58,6 +58,8 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
 
     ScreenContainer(
         title = "Inicio",
+        refreshing = vm.refreshing,
+        onRefresh = { vm.pullRefresh() },
         actions = {
             IconButton(onClick = { vm.refreshAll() }) {
                 Icon(Icons.Default.Refresh, contentDescription = "Actualizar")
