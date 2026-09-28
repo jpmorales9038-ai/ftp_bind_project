@@ -373,7 +373,22 @@ class BindViewModel : ViewModel() {
 
     fun setPerfMode(mode: PerfMode) = viewModelScope.launch {
         perfMode = mode
-        val result = withContext(Dispatchers.IO) { RootShell.setPerfMode(mode) }
+        val result = withContext(Dispatchers.IO) {
+            val r = RootShell.setPerfMode(mode)
+            // v1.5.3: el tamaño de caché personalizado ahora solo se puede
+            // elegir en Máximo (el control ya no se muestra en Equilibrado).
+            // Al volver a Equilibrado se borra el ajuste guardado para que no
+            // quede un valor de una sesión anterior en Máximo aplicándose sin
+            // que se vea en ningún lado; setCacheGb(null) hace que se use el
+            // tamaño fijo del perfil (1G, ver defaultCacheGb).
+            if (mode == PerfMode.BALANCED) {
+                val cacheReset = RootShell.setCacheGb(null)
+                if (r.success) cacheReset else r
+            } else {
+                r
+            }
+        }
+        if (mode == PerfMode.BALANCED) cacheGb = null
         message = when {
             !result.success -> "Error al guardar: ${result.output.take(200)}"
             isMounted -> "Guardado. Vuelve a montar para aplicarlo."
