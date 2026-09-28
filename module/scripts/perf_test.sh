@@ -303,7 +303,6 @@ t0=$(now_ms)
 tmo 60 dd if="$F" of=/dev/null bs=1048576 skip=$SKIP count=$TEST_MB 2>/dev/null
 rc=$?
 t1=$(now_ms)
-C1=$(cache_kb)
 
 if [ "$rc" = 124 ]; then
     step read WARN "La primera lectura no terminó en 60 s: el enlace es muy lento (menos de $(fmt10 "$(speed_x10 "$TEST_MB" 60000)") MB/s)."
@@ -312,6 +311,15 @@ elif [ "$rc" != 0 ]; then
     step read FAIL "No se pudo leer $NAME desde la carpeta montada (código $rc)."
     finish
 fi
+
+# rclone escribe el tramo leído a la caché de forma asíncrona, y ext4 además
+# demora la asignación real de bloques en disco hasta el writeback (delayed
+# allocation): medir con du -sk justo después de leer casi siempre da 0
+# aunque la caché SÍ esté funcionando. "sync" fuerza el writeback pendiente
+# antes de medir (no afecta la velocidad reportada: se mide antes de esto).
+sync
+sleep 1
+C1=$(cache_kb)
 
 step read RUN "Leyendo el mismo tramo otra vez"
 t2=$(now_ms)
