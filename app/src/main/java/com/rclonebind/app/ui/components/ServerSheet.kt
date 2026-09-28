@@ -53,6 +53,7 @@ import com.rclonebind.app.root.DriveOptions
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RemoteType
 import com.rclonebind.app.root.cleanHost
+import com.rclonebind.app.root.extractDriveFolderId
 import com.rclonebind.app.root.normalizeToken
 import com.rclonebind.app.root.validateProfileName
 import kotlinx.coroutines.CancellationException
@@ -420,9 +421,9 @@ fun ServerSheet(
                     }
                     OutlinedTextField(
                         value = rootFolder,
-                        onValueChange = { rootFolder = it },
+                        onValueChange = { rootFolder = extractDriveFolderId(it) },
                         label = { Text("ID de carpeta raíz (opcional)") },
-                        supportingText = { Text("Monta solo esa carpeta en vez de todo Mi unidad.") },
+                        supportingText = { Text("Monta solo esa carpeta en vez de todo Mi unidad. Puedes pegar el link para compartir: se toma solo el ID.") },
                         singleLine = true,
                         shape = MaterialTheme.shapes.large,
                         modifier = Modifier.fillMaxWidth()

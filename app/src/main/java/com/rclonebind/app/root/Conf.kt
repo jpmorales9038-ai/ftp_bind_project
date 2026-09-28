@@ -130,6 +130,27 @@ fun cleanHost(raw: String): String =
         .substringBefore("/")
         .substringBefore(":")
 
+// Patrones de link para compartir una carpeta de Drive:
+//   https://drive.google.com/drive/folders/<id>?usp=sharing
+//   https://drive.google.com/drive/u/0/folders/<id>
+//   https://drive.google.com/open?id=<id>                 (link viejo, cualquier archivo/carpeta)
+private val DRIVE_FOLDER_URL = Regex("""/folders/([A-Za-z0-9_-]+)""")
+private val DRIVE_ID_PARAM = Regex("""[?&]id=([A-Za-z0-9_-]+)""")
+
+/**
+ * Es más fácil pegar el link para compartir la carpeta que buscar su ID a
+ * mano. Si [raw] matchea alguno de los links de arriba, devuelve solo el
+ * ID; si no matchea nada (ya es un ID, o cualquier otro texto), se
+ * devuelve tal cual recortado, para no interferir con lo que el usuario
+ * esté escribiendo.
+ */
+fun extractDriveFolderId(raw: String): String {
+    val trimmed = raw.trim()
+    DRIVE_FOLDER_URL.find(trimmed)?.let { return it.groupValues[1] }
+    DRIVE_ID_PARAM.find(trimmed)?.let { return it.groupValues[1] }
+    return trimmed
+}
+
 // Reglas de rclone para el nombre de un remoto: solo estos caracteres ASCII,
 // sin empezar con "-" ni con espacio.
 private val NAME_REGEX = Regex("^[A-Za-z0-9_.+@][A-Za-z0-9_.+@ -]*$")
