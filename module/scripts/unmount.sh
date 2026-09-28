@@ -18,7 +18,7 @@ umount -l "$TARGET_PATH" 2>>"$LOG_FILE"
 umount -l "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || "$MODDIR/bin/fusermount3" -u "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE"
 
 # Por si el mount corre como proceso en background
-pkill -f "rclone mount remote" 2>/dev/null
+pkill -f "$MODDIR/bin/rclone mount" 2>/dev/null
 
 echo '{"mounted":false}' > "$STATUS_FILE"
 echo "$(date): Desmontado" >> "$LOG_FILE"

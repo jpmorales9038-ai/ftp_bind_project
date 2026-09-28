@@ -1,0 +1,167 @@
+package com.rclonebind.app.ui.components
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import com.rclonebind.app.root.FtpProfile
+import com.rclonebind.app.ui.theme.AppMotion
+
+// Parte visible de una tarjeta cerrada, y cuánto se mete bajo la siguiente
+// (para que no se vea el fondo entre las esquinas redondeadas).
+private val PeekHeight = 88.dp
+private val UnderlapHeight = 32.dp
+private val OpenHeight = 216.dp
+
+/**
+ * Pila de tarjetas tipo cartera: las cerradas asoman solo su franja superior y
+ * la seleccionada se abre completa, empujando a las de abajo con un resorte.
+ * Tocar una tarjeta cerrada la selecciona.
+ */
+@Composable
+fun ServerCardStack(
+    profiles: List<FtpProfile>,
+    selected: String?,
+    onSelect: (String) -> Unit,
+    onEdit: (FtpProfile) -> Unit,
+    onDelete: (FtpProfile) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val tops = ArrayList<Dp>()
+    val heights = ArrayList<Dp>()
+    var y = 0.dp
+    profiles.forEach { p ->
+        val open = p.name == selected
+        tops.add(y)
+        heights.add(if (open) OpenHeight else PeekHeight + UnderlapHeight)
+        y += if (open) OpenHeight else PeekHeight
+    }
+    val totalHeight = if (profiles.isEmpty()) 0.dp else tops.last() + heights.last()
+    val animatedTotal by animateDpAsState(totalHeight, AppMotion.spatial(), label = "stackHeight")
+
+    Box(modifier.fillMaxWidth().height(animatedTotal)) {
+        profiles.forEachIndexed { index, profile ->
+            key(profile.name) {
+                StackCard(
+                    profile = profile,
+                    index = index,
+                    isSelected = profile.name == selected,
+                    top = tops[index],
+                    height = heights[index],
+                    onSelect = { onSelect(profile.name) },
+                    onEdit = { onEdit(profile) },
+                    onDelete = { onDelete(profile) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StackCard(
+    profile: FtpProfile,
+    index: Int,
+    isSelected: Boolean,
+    top: Dp,
+    height: Dp,
+    onSelect: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val animatedTop by animateDpAsState(top, AppMotion.spatial(), label = "cardTop")
+    val animatedHeight by animateDpAsState(height, AppMotion.spatial(), label = "cardHeight")
+
+    val scheme = MaterialTheme.colorScheme
+    val container = if (isSelected) scheme.primary else when (index % 3) {
+        0 -> scheme.secondaryContainer
+        1 -> scheme.tertiaryContainer
+        else -> scheme.surfaceContainerHighest
+    }
+    val content = if (isSelected) scheme.onPrimary else when (index % 3) {
+        0 -> scheme.onSecondaryContainer
+        1 -> scheme.onTertiaryContainer
+        else -> scheme.onSurface
+    }
+    val bg by animateColorAsState(container, AppMotion.effects(), label = "cardBg")
+    val fg by animateColorAsState(content, AppMotion.effects(), label = "cardFg")
+
+    Surface(
+        onClick = onSelect,
+        enabled = !isSelected,
+        shape = MaterialTheme.shapes.extraLarge,
+        color = bg,
+        contentColor = fg,
+        shadowElevation = if (isSelected) 8.dp else 4.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset { IntOffset(0, animatedTop.roundToPx()) }
+            .height(animatedHeight)
+            .semantics { this.selected = isSelected }
+    ) {
+        Column(Modifier.padding(horizontal = 24.dp, vertical = 20.dp)) {
+            Text(
+                text = profile.name,
+                style = if (isSelected) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = if (profile.user.isEmpty()) profile.host else "${profile.user}@${profile.host}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = LocalContentColor.current.copy(alpha = 0.8f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            AnimatedVisibility(visible = isSelected) {
+                Column {
+                    Spacer(Modifier.height(12.dp))
+                    Text("Puerto ${profile.port}", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (profile.hasPassword) "Contraseña guardada" else "Sin contraseña",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current)
+                        TextButton(onClick = onEdit, colors = colors) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                            Text("Editar")
+                        }
+                        TextButton(onClick = onDelete, colors = colors) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                            Text("Eliminar")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

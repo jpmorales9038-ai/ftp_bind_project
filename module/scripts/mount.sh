@@ -45,6 +45,15 @@ if [ ! -f "$RCLONE_CONF" ]; then
     exit 1
 fi
 
+# Servidor seleccionado en la app (config/active). Sin ese archivo se usa
+# "remote", el nombre que usaban las versiones con un solo servidor.
+ACTIVE="$(cat "$MODDIR/config/active" 2>/dev/null)"
+[ -z "$ACTIVE" ] && ACTIVE="remote"
+if ! grep -qxF "[$ACTIVE]" "$RCLONE_CONF"; then
+    echo "$(date): No existe el servidor '$ACTIVE' en rclone.conf" >> "$LOG_FILE"
+    exit 1
+fi
+
 mkdir -p "$RCLONE_MOUNTPOINT"
 mkdir -p "$TARGET_PATH"
 
@@ -54,7 +63,7 @@ if mount | grep -q "$RCLONE_MOUNTPOINT"; then
     exit 0
 fi
 
-"$RCLONE_BIN" mount remote: "$RCLONE_MOUNTPOINT" \
+"$RCLONE_BIN" mount "$ACTIVE:" "$RCLONE_MOUNTPOINT" \
     --config "$RCLONE_CONF" \
     --cache-dir "$CACHE_DIR" \
     --allow-other \
@@ -67,8 +76,8 @@ sleep 2
 
 if mount | grep -q "$RCLONE_MOUNTPOINT"; then
     mount --bind "$RCLONE_MOUNTPOINT" "$TARGET_PATH"
-    echo '{"mounted":true}' > "$STATUS_FILE"
-    echo "$(date): Montado correctamente en $TARGET_PATH" >> "$LOG_FILE"
+    echo "{\"mounted\":true,\"remote\":\"$ACTIVE\"}" > "$STATUS_FILE"
+    echo "$(date): '$ACTIVE' montado correctamente en $TARGET_PATH" >> "$LOG_FILE"
 else
     echo '{"mounted":false}' > "$STATUS_FILE"
     echo "$(date): Fallo al montar rclone" >> "$LOG_FILE"
