@@ -54,8 +54,10 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     // Material 3 Expressive vive en la línea 1.5.0-alpha (la 1.4.0 estable no lo trae).
-    // alpha23: última que no exige compileSdk 37 / Compose 1.12 (alpha24+ sí).
-    implementation("androidx.compose.material3:material3:1.5.0-alpha23")
+    // alpha18 es la que sigue alineada con Compose 1.11.x (BOM 2026.04.01), que
+    // compila con compileSdk 36 y AGP 8.x. Desde alpha23 material3 arrastra
+    // Compose 1.12 alpha, que exige compileSdk 37 y AGP 9.1.
+    implementation("androidx.compose.material3:material3:1.5.0-alpha18")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.navigation:navigation-compose:2.9.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
