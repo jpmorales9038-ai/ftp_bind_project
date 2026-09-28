@@ -12,6 +12,7 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +38,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -48,11 +50,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.rclonebind.app.ui.components.LocalContentBottomInset
 import com.rclonebind.app.ui.screens.HomeScreen
 import com.rclonebind.app.ui.screens.LogsScreen
 import com.rclonebind.app.ui.screens.ServersScreen
 import com.rclonebind.app.ui.theme.RCloneTheme
 import com.topjohnwu.superuser.Shell
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -93,6 +101,7 @@ private fun AppScaffold(vm: BindViewModel) {
     val pagerState = rememberPagerState(pageCount = { items.size })
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val hazeState = rememberHazeState()
 
     fun goTo(page: Int) {
         scope.launch { pagerState.animateScrollToPage(page) }
@@ -117,22 +126,27 @@ private fun AppScaffold(vm: BindViewModel) {
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             // Deslizar horizontalmente cambia de pestaña. Las 3 páginas se
-            // mantienen compuestas para conservar scroll y estado.
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize().padding(bottom = PillSpace),
-                beyondViewportPageCount = items.size
-            ) { page ->
-                when (items[page]) {
-                    Screen.Home -> HomeScreen(vm, onOpenServers = { goTo(1) })
-                    Screen.Servers -> ServersScreen(vm)
-                    Screen.Logs -> LogsScreen(vm)
+            // mantienen compuestas para conservar scroll y estado. El pager
+            // ocupa todo el alto (es la fuente del desenfoque): cada pantalla
+            // suma PillSpace a su relleno inferior vía LocalContentBottomInset.
+            CompositionLocalProvider(LocalContentBottomInset provides PillSpace) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize().hazeSource(hazeState),
+                    beyondViewportPageCount = items.size
+                ) { page ->
+                    when (items[page]) {
+                        Screen.Home -> HomeScreen(vm, onOpenServers = { goTo(1) })
+                        Screen.Servers -> ServersScreen(vm)
+                        Screen.Logs -> LogsScreen(vm)
+                    }
                 }
             }
 
             FloatingPillNav(
                 items = items,
                 pagerState = pagerState,
+                hazeState = hazeState,
                 onSelect = ::goTo,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -143,22 +157,34 @@ private fun AppScaffold(vm: BindViewModel) {
 }
 
 /**
- * Barra inferior flotante en forma de píldora. Colores del esquema dinámico:
- * fondo primaryContainer, indicador primary, contenido onPrimary /
+ * Barra inferior flotante en forma de píldora con fondo desenfocado. Colores
+ * del esquema dinámico: fondo primaryContainer (translúcido), indicador primary, contenido onPrimary /
  * onPrimaryContainer. La pestaña activa muestra icono + etiqueta.
  */
 @Composable
 private fun FloatingPillNav(
     items: List<Screen>,
     pagerState: PagerState,
+    hazeState: HazeState,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = MaterialTheme.colorScheme
+    // Vidrio esmerilado: desenfoca lo que pasa por debajo y lo tiñe con
+    // primaryContainer semitransparente (sigue el color dinámico). Sin
+    // Android 12+ Haze cae a un tinte plano.
     Surface(
-        modifier = modifier,
+        modifier = modifier
+            .clip(CircleShape)
+            .hazeEffect(state = hazeState) {
+                backgroundColor = colors.surface
+                blurRadius = 24.dp
+                noiseFactor = 0f
+                tints = listOf(HazeTint(colors.primaryContainer.copy(alpha = 0.55f)))
+            },
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        shadowElevation = 6.dp
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, colors.onPrimaryContainer.copy(alpha = 0.12f))
     ) {
         Row(
             modifier = Modifier.padding(8.dp),

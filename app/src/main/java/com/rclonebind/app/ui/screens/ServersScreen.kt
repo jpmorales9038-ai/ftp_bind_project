@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
 import com.rclonebind.app.root.RemoteProfile
+import com.rclonebind.app.ui.components.LocalContentBottomInset
 import com.rclonebind.app.ui.components.ScreenContainer
 import com.rclonebind.app.ui.components.ServerCardStack
 import com.rclonebind.app.ui.components.ServerSheet
@@ -79,7 +80,10 @@ fun ServersScreen(vm: BindViewModel) {
                 onClick = openNew,
                 icon = { Icon(Icons.Default.Add, contentDescription = null) },
                 text = { Text("Agregar") },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp)
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(20.dp)
+                    .padding(bottom = LocalContentBottomInset.current)
             )
         }
     }
