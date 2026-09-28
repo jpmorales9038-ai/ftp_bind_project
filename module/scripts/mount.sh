@@ -23,8 +23,10 @@ CACHE_DIR="$MODDIR/cache"
 
 # Punto donde rclone monta realmente el FTP
 RCLONE_MOUNTPOINT="/data/local/tmp/rclone_ftp"
-# Ruta final visible en el almacenamiento interno (bind)
-TARGET_PATH="/sdcard/FTP"
+# Ruta final visible en el almacenamiento interno (bind). Configurable desde
+# la app (config/target_path); sin ese archivo se usa la de siempre.
+TARGET_PATH="$(cat "$MODDIR/config/target_path" 2>/dev/null)"
+[ -z "$TARGET_PATH" ] && TARGET_PATH="/sdcard/FTP"
 
 # Al correr como root vía su/servicio, $HOME suele venir vacío o en "/", y
 # rclone intenta entonces crear su vfs cache en "/.cache" — que cae en la
@@ -67,7 +69,10 @@ is_bound() { grep -q " $TARGET_PATH " /proc/mounts; }
 do_bind() {
     is_bound || mount --bind "$RCLONE_MOUNTPOINT" "$TARGET_PATH"
     if is_bound; then
-        echo "{\"mounted\":true,\"remote\":\"$ACTIVE\"}" > "$STATUS_FILE"
+        # Se guarda el TARGET_PATH real usado (no solo el de config): si el
+        # usuario cambia la ruta desde la app mientras esto sigue montado en
+        # la anterior, unmount.sh debe seguir apuntando a esta, no a la nueva.
+        echo "{\"mounted\":true,\"remote\":\"$ACTIVE\",\"target\":\"$TARGET_PATH\"}" > "$STATUS_FILE"
         echo "$(date): '$ACTIVE' montado correctamente en $TARGET_PATH" >> "$LOG_FILE"
         exit 0
     fi

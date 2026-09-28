@@ -4,14 +4,17 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -19,6 +22,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -33,6 +39,8 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val mounted = vm.isMounted
     val active = vm.activeName
+    var showPathDialog by remember { mutableStateOf(false) }
+    var pathInput by remember { mutableStateOf(vm.targetPath) }
     val heroColor by animateColorAsState(
         if (mounted) scheme.primaryContainer else scheme.surfaceContainerHigh,
         AppMotion.effects(), label = "heroColor"
@@ -56,9 +64,9 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                 )
                 Text(
                     if (mounted) {
-                        "Los archivos de ${vm.mountedRemote ?: "tu servidor"} están en /sdcard/FTP."
+                        "Los archivos de ${vm.mountedRemote ?: "tu servidor"} están en ${vm.targetPath}."
                     } else {
-                        "Elige un servidor y móntalo en /sdcard/FTP."
+                        "Elige un servidor y móntalo en ${vm.targetPath}."
                     },
                     style = MaterialTheme.typography.bodyLarge
                 )
@@ -153,5 +161,65 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                 Switch(checked = vm.autostart, onCheckedChange = { vm.setAutostart(it) })
             }
         }
+
+        Surface(
+            color = scheme.surfaceContainer,
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Carpeta de destino",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant
+                    )
+                    Text(vm.targetPath, style = MaterialTheme.typography.titleMedium)
+                }
+                TextButton(onClick = {
+                    pathInput = vm.targetPath
+                    showPathDialog = true
+                }) {
+                    Text("Editar")
+                }
+            }
+        }
+    }
+
+    if (showPathDialog) {
+        AlertDialog(
+            onDismissRequest = { showPathDialog = false },
+            title = { Text("Carpeta de destino") },
+            text = {
+                Column {
+                    Text(
+                        "Ruta donde se verá el bind del servidor montado.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = pathInput,
+                        onValueChange = { pathInput = it },
+                        singleLine = true,
+                        label = { Text("Ruta") },
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.setTargetPath(pathInput)
+                    showPathDialog = false
+                }) { Text("Guardar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPathDialog = false }) { Text("Cancelar") }
+            }
+        )
     }
 }

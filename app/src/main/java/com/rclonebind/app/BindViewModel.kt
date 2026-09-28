@@ -5,9 +5,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.rclonebind.app.root.DEFAULT_TARGET_PATH
 import com.rclonebind.app.root.FtpProfile
 import com.rclonebind.app.root.RootShell
 import com.rclonebind.app.root.cleanHost
+import com.rclonebind.app.root.cleanTargetPath
+import com.rclonebind.app.root.validateTargetPath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -16,7 +19,8 @@ private class Snapshot(
     val profiles: List<FtpProfile>,
     val active: String?,
     val status: String,
-    val autostart: Boolean
+    val autostart: Boolean,
+    val targetPath: String
 )
 
 class BindViewModel : ViewModel() {
@@ -33,6 +37,9 @@ class BindViewModel : ViewModel() {
     var rootGranted by mutableStateOf<Boolean?>(null)
         private set
     var profiles by mutableStateOf<List<FtpProfile>>(emptyList())
+        private set
+    /** Ruta donde queda visible el bind (editable desde Inicio). */
+    var targetPath by mutableStateOf(DEFAULT_TARGET_PATH)
         private set
     /** Servidor seleccionado: el que usa el botón Montar. */
     var activeName by mutableStateOf<String?>(null)
@@ -59,7 +66,8 @@ class BindViewModel : ViewModel() {
                 profiles = RootShell.loadProfiles(),
                 active = RootShell.readActive(),
                 status = RootShell.status().output,
-                autostart = RootShell.readAutostart()
+                autostart = RootShell.readAutostart(),
+                targetPath = RootShell.readTargetPath()
             )
         }
 
@@ -76,6 +84,7 @@ class BindViewModel : ViewModel() {
         profiles = snap.profiles
         activeName = active
         autostart = snap.autostart
+        targetPath = snap.targetPath
         isMounted = snap.status.contains("\"mounted\":true")
         mountedRemote = if (isMounted) {
             Regex("\"remote\":\"([^\"]*)\"").find(snap.status)?.groupValues?.get(1)
@@ -137,6 +146,22 @@ class BindViewModel : ViewModel() {
         message = if (result.success) null else "Error: ${result.output.takeLast(200)}"
         reload()
         busy = false
+    }
+
+    fun setTargetPath(path: String) = viewModelScope.launch {
+        val clean = cleanTargetPath(path)
+        val error = validateTargetPath(clean)
+        if (error != null) {
+            message = error
+            return@launch
+        }
+        val result = withContext(Dispatchers.IO) { RootShell.setTargetPath(clean) }
+        if (result.success) {
+            targetPath = clean
+            message = if (isMounted) "Ruta guardada. Vuelve a montar para aplicarla." else "Ruta guardada"
+        } else {
+            message = "Error al guardar la ruta: ${result.output.take(200)}"
+        }
     }
 
     fun setAutostart(enabled: Boolean) = viewModelScope.launch {

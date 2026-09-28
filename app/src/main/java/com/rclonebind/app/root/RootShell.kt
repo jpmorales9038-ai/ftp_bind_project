@@ -13,6 +13,7 @@ object ModulePaths {
     const val CONFIG_DIR = "$BASE/config"
     const val RCLONE_CONF = "$CONFIG_DIR/rclone.conf"
     const val ACTIVE_FILE = "$CONFIG_DIR/active"
+    const val TARGET_PATH_FILE = "$CONFIG_DIR/target_path"
     const val STATUS_FILE = "$BASE/status.json"
     const val LOG_FILE = "$BASE/mount.log"
 }
@@ -123,6 +124,13 @@ object RootShell {
 
     fun setActive(name: String): Result =
         run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(name)} > ${ModulePaths.ACTIVE_FILE}")
+
+    fun readTargetPath(): String =
+        Shell.cmd("cat ${ModulePaths.TARGET_PATH_FILE} 2>/dev/null").exec().out
+            .joinToString("").trim().ifEmpty { DEFAULT_TARGET_PATH }
+
+    fun setTargetPath(path: String): Result =
+        run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(path)} > ${ModulePaths.TARGET_PATH_FILE}")
 
     fun readAutostart(): Boolean =
         Shell.cmd("cat ${ModulePaths.CONFIG_DIR}/autostart 2>/dev/null").exec().out

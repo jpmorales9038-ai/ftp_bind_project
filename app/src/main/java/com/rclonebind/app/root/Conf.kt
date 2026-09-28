@@ -75,3 +75,24 @@ fun validateProfileName(name: String, original: String?, existing: List<String>)
     name != original && existing.contains(name) -> "Ya existe un servidor con ese nombre"
     else -> null
 }
+
+/** Ruta de destino del bind cuando el usuario todavía no configuró una propia. */
+const val DEFAULT_TARGET_PATH = "/sdcard/FTP"
+
+/** Quita espacios y la barra final (salvo que la ruta sea solo "/"). */
+fun cleanTargetPath(raw: String): String {
+    val trimmed = raw.trim()
+    return if (trimmed.length > 1) trimmed.trimEnd('/') else trimmed
+}
+
+/**
+ * Reglas mínimas para la ruta de destino: absoluta, sin ".." (evita salirse
+ * de donde debería quedar el bind) y distinta de la raíz del sistema.
+ */
+fun validateTargetPath(path: String): String? = when {
+    path.isEmpty() -> "Escribe una ruta"
+    !path.startsWith("/") -> "Debe ser una ruta absoluta (empieza con /)"
+    path == "/" -> "No uses la raíz del sistema"
+    path.contains("..") -> "La ruta no puede contener \"..\""
+    else -> null
+}

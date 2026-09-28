@@ -25,10 +25,18 @@ module/    Módulo KernelSU (scripts de montaje + binario rclone)
    `module/config/rclone.conf` (vía root) y recuerda el seleccionado en
    `module/config/active`. En la pestaña **Servidores** se ven como una pila
    de tarjetas: tocar una la selecciona; ahí mismo se agregan, editan y
-   eliminan. Las contraseñas se guardan ofuscadas con `rclone obscure`.
+   eliminan. Las contraseñas se guardan ofuscadas con `rclone obscure`. Al
+   agregar un servidor, un botón "Buscar servidores FTP en mi red" barre la
+   subred local (puerto 21) con sockets normales de la app —sin root— y
+   deja elegir uno para llenar Host/Puerto automáticamente
+   (`app/.../net/FtpScanner.kt`).
 3. `scripts/mount.sh` monta el servidor seleccionado con `rclone mount --daemon` en un punto
-   temporal y luego hace `mount --bind` hacia `/sdcard/FTP`.
-4. `scripts/unmount.sh` revierte ambos montajes.
+   temporal y luego hace `mount --bind` hacia la carpeta de destino
+   (`module/config/target_path`, editable desde **Inicio**; por defecto
+   `/sdcard/FTP`).
+4. `scripts/unmount.sh` revierte ambos montajes, usando la ruta que quedó
+   realmente montada (guardada en `status.json`) por si el usuario cambió
+   la carpeta de destino después de montar sin haber vuelto a montar.
 5. `service.sh` remonta automáticamente al boot si el usuario activó
    "Montar al iniciar" desde la app.
 

@@ -12,7 +12,15 @@ LOG_FILE="$MODDIR/mount.log"
 STATUS_FILE="$MODDIR/status.json"
 
 RCLONE_MOUNTPOINT="/data/local/tmp/rclone_ftp"
-TARGET_PATH="/sdcard/FTP"
+
+# Prioridad: la ruta que quedó realmente montada (guardada en status.json al
+# montar) por si config/target_path cambió después sin volver a montar;
+# si no hay status, se usa la de config, y si tampoco, la de siempre.
+TARGET_PATH="$(sed -n 's/.*"target":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
+if [ -z "$TARGET_PATH" ]; then
+    TARGET_PATH="$(cat "$MODDIR/config/target_path" 2>/dev/null)"
+fi
+[ -z "$TARGET_PATH" ] && TARGET_PATH="/sdcard/FTP"
 
 umount -l "$TARGET_PATH" 2>>"$LOG_FILE"
 umount -l "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || "$MODDIR/bin/fusermount3" -u "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE"
