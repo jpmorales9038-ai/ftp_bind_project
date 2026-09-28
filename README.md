@@ -1,109 +1,129 @@
-# RClone FTP Bind
+<p align="center">
+  <img src="docs/banner.svg" alt="RClone FTP Bind" width="100%">
+</p>
 
-App Jetpack Compose + módulo KernelSU que monta un remoto (**FTP** o **Google Drive**)
-mediante **rclone** y lo expone como bind en el almacenamiento interno del dispositivo.
+<p align="center">
+  <a href="https://github.com/jpmorales9038-ai/ftp_bind_project/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/jpmorales9038-ai/ftp_bind_project?style=for-the-badge&color=1594A8"></a>
+  <a href="https://github.com/jpmorales9038-ai/ftp_bind_project/actions/workflows/build.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/jpmorales9038-ai/ftp_bind_project/build.yml?branch=main&style=for-the-badge&label=build"></a>
+  <a href="https://github.com/jpmorales9038-ai/ftp_bind_project/releases"><img alt="Descargas" src="https://img.shields.io/github/downloads/jpmorales9038-ai/ftp_bind_project/total?style=for-the-badge&color=0A4657"></a>
+  <img alt="Último commit" src="https://img.shields.io/github/last-commit/jpmorales9038-ai/ftp_bind_project?style=for-the-badge&color=4D616C">
+</p>
 
-## Estructura
+<p align="center">
+  <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white">
+  <img alt="arm64" src="https://img.shields.io/badge/arquitectura-arm64-555?style=flat-square">
+  <img alt="KernelSU" src="https://img.shields.io/badge/KernelSU-m%C3%B3dulo-orange?style=flat-square">
+  <img alt="rclone" src="https://img.shields.io/badge/rclone-mount-1594A8?style=flat-square">
+  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white">
+  <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white">
+  <img alt="Material 3" src="https://img.shields.io/badge/Material%203-6750A4?style=flat-square&logo=materialdesign&logoColor=white">
+</p>
 
-```
-app/       App Compose (Inicio, Servidores, Logs y Acerca de; icono adaptable en res/)
-module/    Módulo KernelSU (scripts de montaje + binario rclone)
-```
+<h3 align="center">Monta servidores FTP y Google Drive como una carpeta más de tu almacenamiento interno.<br>Cualquier app puede usarlos, sin configurar nada en cada una.</h3>
+
+---
 
 ## Cómo funciona
 
-1. El zip del módulo trae el APK embebido (`module/app.apk`). Al flashear
-   el módulo desde el Manager de KernelSU (con el sistema arrancado),
-   `customize.sh` instala la app automáticamente (`scripts/install_app.sh`:
-   `pm`/`cmd package`, por ruta y por stdin): instala la app la
-   primera vez y la **actualiza sin perder datos** en cada reflasheo, ya
-   que `-r` sobrescribe la instalación existente conservando su config.
-   Si el módulo se flashea desde recovery (sistema no arrancado), no hay
-   `pm` disponible y el script solo avisa dónde quedó el APK para
-   instalarlo a mano.
-2. La app guarda cada servidor (FTP o Google Drive) como una sección `[nombre]` de
-   `module/config/rclone.conf` (vía root) y recuerda el seleccionado en
-   `module/config/active`. En la pestaña **Servidores** se ven como una pila
-   de tarjetas: tocar una la selecciona; ahí mismo se agregan, editan y
-   eliminan. Las contraseñas se guardan ofuscadas con `rclone obscure`. Al
-   agregar un servidor, un botón "Buscar servidores FTP en mi red" barre la
-   subred local (puerto 21) con sockets normales de la app —sin root— y
-   deja elegir uno para llenar Host/Puerto automáticamente
-   (`app/.../net/FtpScanner.kt`).
-   **Google Drive**: en el formulario se elige el tipo "Google Drive" y se toca
-   "Iniciar sesión con Google". La app lanza `rclone authorize drive`
-   (`scripts/drive_auth.sh`, con root) y abre la URL en el navegador del
-   teléfono; Google redirige a `127.0.0.1:53682`, donde escucha rclone en el
-   propio dispositivo, y el token queda guardado en la sección del remoto
-   (`type = drive`, `scope`, `token`). No hace falta un PC. Opciones: solo
-   lectura (`drive.readonly`), carpeta raíz o unidad compartida, Client
-   ID/Secret propios y pegar un token generado en un PC. Al guardar se lista
-   la raíz de Drive (`scripts/check_remote.sh`) para confirmar que la
-   sesión, la red, el DNS y los certificados funcionan. El cliente OAuth
-   de Google lo trae la app (se inyecta al compilar desde los secrets
-   `GDRIVE_CLIENT_ID` y `GDRIVE_CLIENT_SECRET` de GitHub Actions, o desde
-   `gdriveClientId` / `gdriveClientSecret` en `gradle.properties` local; nunca
-   en el repo): el usuario solo da su consentimiento. Sin secrets se usa el
-   cliente compartido de rclone. En "Opciones avanzadas" cada usuario puede
-   poner el suyo. Para crear el cliente: Google Cloud Console, proyecto con la
-   API de Drive habilitada, cliente OAuth tipo "Aplicación de escritorio" y
-   pantalla de consentimiento publicada "En producción" (en "Testing" el token
-   caduca a los 7 días). Sin verificación de Google, el scope `drive`
-   (restringido) permite hasta 100 usuarios nuevos y muestra la pantalla
-   "app no verificada".
-3. `scripts/mount.sh` monta el servidor seleccionado con `rclone mount --daemon` en un punto
-   temporal y luego hace `mount --bind` hacia la carpeta de destino
-   (`module/config/target_path`, editable desde **Inicio**; por defecto
-   `/sdcard/FTP`).
-4. `scripts/unmount.sh` revierte ambos montajes, usando la ruta que quedó
-   realmente montada (guardada en `status.json`) por si el usuario cambió
-   la carpeta de destino después de montar sin haber vuelto a montar.
-   Los scripts comparten `scripts/env.sh` (HOME, PATH y `SSL_CERT_DIR` con los
-   certificados de Android; sin eso el rclone estático no valida HTTPS). Para
-   Drive, `mount.sh` usa `--vfs-cache-mode full` (caché acotada a 1 GB) y el
-   módulo agrega `system/etc/resolv.conf` (rclone resuelve DNS leyéndolo y
-   Android no lo trae): tras flashear por primera vez hay que **reiniciar**.
-   Si el dispositivo ya tiene uno con nameservers, el módulo no lo pisa. Como
-   respaldo (p. ej. KernelSU sin metamódulo), `env.sh` monta en runtime un
-   overlay de `/system/etc` con un `resolv.conf` propio.
-5. `service.sh` remonta automáticamente al boot si el usuario activó
-   "Montar al iniciar" desde la app.
+```mermaid
+flowchart LR
+    A["Servidor FTP"] --> R
+    B["Google Drive"] --> R
+    R["rclone mount<br/>(FUSE)"] --> M["mount --bind"]
+    M --> C["/sdcard/FTP<br/>o la carpeta que elijas"]
+    C --> D["Galería"]
+    C --> E["Reproductores"]
+    C --> F["Gestores de archivos"]
+    C --> G["Cualquier app"]
 
-## Tema
+    style R fill:#1594A8,color:#fff,stroke:#0A4657
+    style M fill:#0A4657,color:#fff,stroke:#0A4657
+    style C fill:#CBC1E9,color:#1D1736,stroke:#615A7D
+```
 
-Material 3 con color dinámico (Material You) en Android 12+, paleta propia en
-versiones anteriores, modo claro/oscuro según el sistema y edge-to-edge. Las
-piezas "expressive" (esquinas grandes, tipografía con más peso, animaciones con
-resorte) están hechas con la librería estable; los componentes oficiales de
-Material 3 Expressive solo existen en `material3` 1.5.0-alpha.
+Iniciar sesión con Google se hace en el propio teléfono, sin PC:
 
-## Requisitos
+```mermaid
+sequenceDiagram
+    participant U as Tú
+    participant A as App
+    participant R as rclone (local)
+    participant G as Google
+    U->>A: Iniciar sesión con Google
+    A->>R: rclone authorize drive
+    R-->>A: URL de autorización
+    A->>G: Abre el navegador
+    U->>G: Da su consentimiento
+    G->>R: Redirige a 127.0.0.1:53682
+    R-->>A: Token
+    A->>A: Guarda el servidor y comprueba la conexión
+```
 
-- Dispositivo rooteado con **KernelSU**
-- Binario `rclone` para la arquitectura del dispositivo, colocado en
-  `module/bin/rclone` (ver `module/bin/README.txt`)
+## Características
 
-## Build (GitHub Actions, sin Android Studio)
+### Servidores en una pila de tarjetas
 
-El workflow `.github/workflows/build.yml` corre en cada push/PR y en tags `v*`:
+- Cada servidor es una tarjeta; la seleccionada se abre y las demás asoman su franja.
+- Tocar una tarjeta elige cuál se monta. Agregar, editar y eliminar desde la misma pantalla.
+- Compatible con **FTP** y **Google Drive**.
+- Las contraseñas se guardan ofuscadas con `rclone obscure`.
+- Al editar, dejar la contraseña vacía conserva la anterior.
 
-1. **build-app**: instala JDK 17 + Android SDK, genera el Gradle wrapper al
-   vuelo (no está versionado) y compila `assembleDebug`. Sube el APK como
-   artifact.
-2. **package-module**: descarga el binario `rclone` (linux-arm64) oficial,
-   lo coloca en `module/bin/`, y empaqueta el módulo como zip flasheable de
-   KernelSU. Sube el zip como artifact.
-3. **release**: en cada push o ejecución manual cuyo build termine bien,
-   publica un Release con el zip del módulo y el APK. Un push normal crea
-   `build-<n>`; un tag `v*` crea el release con ese nombre. Los PR no publican.
+### Encuentra tu servidor FTP solo
 
-Para una versión con nombre: `git tag v0.1.0 && git push origin v0.1.0`.
+- Botón **Buscar servidores FTP en mi red**: recorre la subred local y muestra los que responden.
+- Sondea el puerto 21 y los que usan las apps de servidor FTP para Android y Termux (2121, 2221 y 2222).
+- Usa la red Wi-Fi o Ethernet real aunque haya datos móviles o VPN activos.
+- No necesita root: elegir uno rellena Host y Puerto.
 
-No hace falta tener Android Studio ni el binario de rclone en local para
-que el CI compile y empaquete todo.
+### Google Drive sin PC
 
-## Estado
+- Inicio de sesión desde el teléfono con el flujo de autorización de rclone.
+- Modo **solo lectura**.
+- Montar solo una **carpeta raíz** o una **unidad compartida**.
+- **Client ID y Secret propios**, o pegar un token generado en otro equipo.
+- Al guardar, comprueba la sesión, la red, el DNS y los certificados listando la raíz de Drive.
 
-Proyecto inicial / esqueleto funcional. Pendiente: manejo de errores de
-conexión FTP, reconexión automática, validación de credenciales antes de
-guardar.
+### Montaje que se mantiene
+
+- Se monta con `rclone mount` y se expone con `mount --bind` en la **carpeta de destino que elijas** (por defecto `/sdcard/FTP`), con selector de carpetas integrado.
+- **Montar al iniciar**: espera a que el almacenamiento esté desbloqueado y reintenta hasta que haya red.
+- Un **vigilante** restaura el bind si Android o alguna app lo quita.
+- Cambiar de servidor con uno ya montado se hace con un solo botón.
+- Caché de disco acotada para Drive.
+
+### Instalación y actualizaciones sin fricción
+
+- El zip del módulo **trae la app dentro**: se instala sola al flashear.
+- Reflashear **actualiza la app sin perder tus datos**, y la configuración del módulo se conserva.
+- Si la instalación silenciosa falla, se reintenta al reiniciar y, como último recurso, abre el instalador del sistema.
+- El módulo se actualiza desde el Manager de KernelSU.
+
+### Diseño
+
+- Material 3 con **color dinámico** (Material You) en Android 12 o superior.
+- Modo **claro y oscuro** según el sistema, a pantalla completa.
+- Esquinas amplias, animaciones con resorte y efecto de desenfoque.
+- Icono adaptable con versión monocromática para el tema de íconos.
+- Pantallas de **Inicio**, **Servidores**, **Logs** y **Acerca de**, con la versión de la app y de rclone.
+
+### Publicación automática
+
+- Cada compilación exitosa publica un release con el módulo y el APK.
+- Los tags `v*` publican una versión con nombre.
+
+## Compatibilidad
+
+| | |
+|---|---|
+| Root | KernelSU |
+| Android | 8.0 o superior |
+| Arquitectura | arm64 |
+| Remotos | FTP, Google Drive |
+| Motor | [rclone](https://rclone.org) |
+
+---
+
+<p align="center">
+  <sub>Usa <a href="https://rclone.org">rclone</a> (MIT), <a href="https://github.com/topjohnwu/libsu">libsu</a> (Apache 2.0) y <a href="https://github.com/chrisbanes/haze">Haze</a> (Apache 2.0).</sub>
+</p>

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" width="1200" height="360" role="img" aria-label="RClone FTP Bind">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1594A8"/>
+      <stop offset="1" stop-color="#0A4657"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.08"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="360" rx="36" fill="url(#bg)"/>
+  <circle cx="1060" cy="40" r="190" fill="#FFFFFF" opacity="0.06"/>
+  <circle cx="1140" cy="330" r="130" fill="#FFFFFF" opacity="0.05"/>
+
+  <!-- pila de tarjetas -->
+  <g transform="translate(90 70)">
+    <rect x="0" y="0" width="230" height="150" rx="26" fill="#B4CAD6" opacity="0.55"/>
+    <rect x="0" y="34" width="230" height="150" rx="26" fill="#CBC1E9" opacity="0.75"/>
+    <rect x="0" y="68" width="230" height="170" rx="26" fill="#FFFFFF"/>
+    <rect x="24" y="96" width="120" height="16" rx="8" fill="#0A4657"/>
+    <rect x="24" y="126" width="170" height="10" rx="5" fill="#0A4657" opacity="0.45"/>
+    <rect x="24" y="148" width="90" height="10" rx="5" fill="#0A4657" opacity="0.45"/>
+    <circle cx="196" cy="104" r="10" fill="#1594A8"/>
+  </g>
+
+  <text x="380" y="150" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="68" font-weight="800" fill="#FFFFFF" letter-spacing="-1.5">RClone FTP Bind</text>
+  <text x="382" y="198" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="26" fill="#FFFFFF" opacity="0.88">Tus servidores FTP y Google Drive, como una carpeta más del teléfono.</text>
+
+  <g font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="20" font-weight="600" fill="#FFFFFF">
+    <rect x="382" y="240" width="92" height="42" rx="21" fill="url(#glass)" stroke="#FFFFFF" stroke-opacity="0.35"/>
+    <text x="428" y="268" text-anchor="middle">FTP</text>
+    <rect x="486" y="240" width="160" height="42" rx="21" fill="url(#glass)" stroke="#FFFFFF" stroke-opacity="0.35"/>
+    <text x="566" y="268" text-anchor="middle">Google Drive</text>
+    <rect x="658" y="240" width="112" height="42" rx="21" fill="url(#glass)" stroke="#FFFFFF" stroke-opacity="0.35"/>
+    <text x="714" y="268" text-anchor="middle">rclone</text>
+    <rect x="782" y="240" width="130" height="42" rx="21" fill="url(#glass)" stroke="#FFFFFF" stroke-opacity="0.35"/>
+    <text x="847" y="268" text-anchor="middle">KernelSU</text>
+  </g>
+</svg>
