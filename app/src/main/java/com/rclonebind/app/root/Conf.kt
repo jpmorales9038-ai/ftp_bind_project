@@ -13,6 +13,8 @@ data class DriveOptions(
     val readOnly: Boolean = false,
     val rootFolderId: String = "",
     val teamDrive: String = "",
+    /** Equivale a --drive-acknowledge-abuse: permite bajar archivos que Google marca como malware/spam. */
+    val acknowledgeAbuse: Boolean = false,
     val hasToken: Boolean = false
 )
 
@@ -81,6 +83,7 @@ fun Conf.toProfiles(): List<RemoteProfile> =
                     readOnly = v["scope"] == DRIVE_SCOPE_READONLY,
                     rootFolderId = v["root_folder_id"].orEmpty(),
                     teamDrive = v["team_drive"].orEmpty(),
+                    acknowledgeAbuse = v["acknowledge_abuse"] == "true",
                     hasToken = !v["token"].isNullOrEmpty()
                 )
             )

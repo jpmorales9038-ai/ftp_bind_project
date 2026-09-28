@@ -141,7 +141,7 @@ object RootShell {
     // Claves que la app administra en un remoto Drive; el resto de claves que
     // el usuario haya puesto a mano (impersonate, export_formats...) se conservan.
     private val DRIVE_MANAGED_KEYS =
-        setOf("type", "client_id", "client_secret", "scope", "token", "root_folder_id", "team_drive")
+        setOf("type", "client_id", "client_secret", "scope", "token", "root_folder_id", "team_drive", "acknowledge_abuse")
 
     /**
      * Crea o edita un remoto Google Drive. Con [token] null al editar se
@@ -166,6 +166,8 @@ object RootShell {
         section["token"] = finalToken
         if (options.rootFolderId.isNotEmpty()) section["root_folder_id"] = options.rootFolderId
         if (options.teamDrive.isNotEmpty()) section["team_drive"] = options.teamDrive
+        // Opción del backend drive: rclone la lee directo del rclone.conf, sin tocar mount.sh.
+        if (options.acknowledgeAbuse) section["acknowledge_abuse"] = "true"
         if (old != null) {
             for ((k, v) in old) {
                 if (k !in DRIVE_MANAGED_KEYS && !section.containsKey(k)) section[k] = v

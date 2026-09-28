@@ -99,6 +99,7 @@ fun ServerSheet(
     var readOnly by remember { mutableStateOf(initialDrive?.readOnly ?: false) }
     var rootFolder by remember { mutableStateOf(initialDrive?.rootFolderId ?: "") }
     var teamDrive by remember { mutableStateOf(initialDrive?.teamDrive ?: "") }
+    var acknowledgeAbuse by remember { mutableStateOf(initialDrive?.acknowledgeAbuse ?: false) }
     var showAdvanced by remember { mutableStateOf(false) }
     var showManual by remember { mutableStateOf(false) }
     var manualToken by remember { mutableStateOf("") }
@@ -401,6 +402,22 @@ fun ServerSheet(
                     Text(if (showAdvanced) "Ocultar opciones avanzadas" else "Opciones avanzadas")
                 }
                 if (showAdvanced) {
+                    Row(
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text("Permitir archivos marcados como malware", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "Descarga archivos que Google Drive bloquea como malware o spam " +
+                                    "(error 403 cannotDownloadAbusiveFile). Actívalo solo si confías en el contenido.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = acknowledgeAbuse, onCheckedChange = { acknowledgeAbuse = it })
+                    }
                     OutlinedTextField(
                         value = rootFolder,
                         onValueChange = { rootFolder = it },
@@ -510,7 +527,8 @@ fun ServerSheet(
                                     clientSecret = effectiveClientSecret,
                                     readOnly = readOnly,
                                     rootFolderId = rootFolder.trim(),
-                                    teamDrive = teamDrive.trim()
+                                    teamDrive = teamDrive.trim(),
+                                    acknowledgeAbuse = acknowledgeAbuse
                                 )
                             )
                         }

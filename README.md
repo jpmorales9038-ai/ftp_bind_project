@@ -80,6 +80,7 @@ sequenceDiagram
 
 - Inicio de sesión desde el teléfono con el flujo de autorización de rclone.
 - Modo **solo lectura**.
+- Interruptor para **permitir archivos marcados como malware** (`acknowledge_abuse`), que Drive bloquea con el error 403 `cannotDownloadAbusiveFile`.
 - Montar solo una **carpeta raíz** o una **unidad compartida**.
 - **Client ID y Secret propios**, o pegar un token generado en otro equipo.
 - Al guardar, comprueba la sesión, la red, el DNS y los certificados listando la raíz de Drive.
