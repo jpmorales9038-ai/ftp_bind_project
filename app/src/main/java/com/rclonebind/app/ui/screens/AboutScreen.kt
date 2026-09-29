@@ -31,14 +31,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
 import com.rclonebind.app.BuildConfig
 import com.rclonebind.app.root.RootShell
 import com.rclonebind.app.ui.components.AppIcons
+import com.rclonebind.app.ui.components.DualPaneContentWidth
 import com.rclonebind.app.ui.components.ScreenContainer
 import com.rclonebind.app.ui.components.SectionCard
+import com.rclonebind.app.ui.components.rememberIsDualPane
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -58,8 +61,15 @@ fun AboutScreen(vm: BindViewModel) {
         }
     }
 
-    ScreenContainer(title = "Acerca de") {
-        // Cabecera: logo + nombre + versión.
+    val dualPane = rememberIsDualPane()
+
+    ScreenContainer(
+        title = "Acerca de",
+        maxContentWidth = if (dualPane) DualPaneContentWidth else null
+    ) {
+        // Cabecera: logo + nombre + versión. Ocupa todo el ancho siempre,
+        // arriba de las columnas (igual que la tarjeta Montado/Desmontado
+        // en Inicio).
         Surface(
             color = scheme.primaryContainer,
             contentColor = scheme.onPrimaryContainer,
@@ -90,38 +100,32 @@ fun AboutScreen(vm: BindViewModel) {
             }
         }
 
-        SectionCard(
-            title = "Qué hace",
-            icon = Icons.Default.Info,
-            subtitle = "Monta un servidor FTP o Google Drive con rclone y lo muestra como una carpeta " +
-                "más de tu almacenamiento interno, para que cualquier app pueda usarlo."
-        ) {
-            Text(
-                "1. Agrega un servidor en la pestaña Servidores.\n" +
-                    "2. Elige la carpeta de destino en Inicio.\n" +
-                    "3. Toca Montar: los archivos remotos aparecen ahí.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = scheme.onSurfaceVariant
-            )
-        }
-
-        SectionCard(title = "Sistema", icon = Icons.Default.Build) {
-            InfoRow("Acceso root", when (vm.rootGranted) {
-                true -> "Concedido"
-                false -> "No disponible"
-                null -> "Comprobando…"
-            })
-            InfoRow("rclone", rcloneVersion ?: "—")
-            InfoRow("Interfaz", "Jetpack Compose · Material 3 Expressive")
-        }
-
-        SectionCard(title = "Enlaces", icon = Icons.Default.Share) {
-            FilledTonalButton(onClick = { uriHandler.openUri(REPO_URL) }, modifier = Modifier.fillMaxWidth()) {
-                Text("Código fuente en GitHub")
+        // En apaisado (o tablet), "Qué hace" y "Enlaces" a la izquierda,
+        // "Sistema" a la derecha — mismo criterio que Inicio: lo
+        // informativo/estático de un lado, el estado en vivo del otro.
+        if (dualPane) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    WhatItDoesCard()
+                    LinksCard(uriHandler)
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    SystemCard(vm, rcloneVersion)
+                }
             }
-            OutlinedButton(onClick = { uriHandler.openUri(RCLONE_URL) }, modifier = Modifier.fillMaxWidth()) {
-                Text("Sitio de rclone")
-            }
+        } else {
+            WhatItDoesCard()
+            SystemCard(vm, rcloneVersion)
+            LinksCard(uriHandler)
         }
 
         Text(
@@ -131,6 +135,49 @@ fun AboutScreen(vm: BindViewModel) {
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
         )
+    }
+}
+
+@Composable
+private fun WhatItDoesCard() {
+    SectionCard(
+        title = "Qué hace",
+        icon = Icons.Default.Info,
+        subtitle = "Monta un servidor FTP o Google Drive con rclone y lo muestra como una carpeta " +
+            "más de tu almacenamiento interno, para que cualquier app pueda usarlo."
+    ) {
+        Text(
+            "1. Agrega un servidor en la pestaña Servidores.\n" +
+                "2. Elige la carpeta de destino en Inicio.\n" +
+                "3. Toca Montar: los archivos remotos aparecen ahí.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun SystemCard(vm: BindViewModel, rcloneVersion: String?) {
+    SectionCard(title = "Sistema", icon = Icons.Default.Build) {
+        InfoRow("Acceso root", when (vm.rootGranted) {
+            true -> "Concedido"
+            false -> "No disponible"
+            null -> "Comprobando…"
+        })
+        InfoRow("rclone", rcloneVersion ?: "—")
+        InfoRow("Interfaz", "Jetpack Compose · Material 3 Expressive")
+    }
+}
+
+@Composable
+private fun LinksCard(uriHandler: UriHandler) {
+    SectionCard(title = "Enlaces", icon = Icons.Default.Share) {
+        FilledTonalButton(onClick = { uriHandler.openUri(REPO_URL) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Código fuente en GitHub")
+        }
+        OutlinedButton(onClick = { uriHandler.openUri(RCLONE_URL) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Sitio de rclone")
+        }
     }
 }
 

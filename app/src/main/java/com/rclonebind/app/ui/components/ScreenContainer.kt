@@ -1,10 +1,8 @@
 package com.rclonebind.app.ui.components
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -31,8 +29,10 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.ui.theme.AppMotion
+import kotlinx.coroutines.isActive
 
 /**
  * Espacio inferior que ocupa la barra flotante. Las pantallas lo suman a su
@@ -199,22 +200,48 @@ private val PullStretchMaxHeight = 32.dp
  * arriba) y el ícono aparece agrandándose y girando con la propia tracción
  * del dedo; al soltar pasado el umbral, sigue girando solo mientras
  * refresca. [PullToRefreshState.distanceFraction] ya viene en 0f..1f+
- * (puede pasarse de 1 si se tira de más), así que alcanza con acotarlo.
+ * (puede pasarse de 1 si se tira de más), así que alcanza con acotarlo
+ * para el alto/escala (que sí tienen un tope visual), pero NO para la
+ * rotación: dejarla sin tope es lo que hace que tirar más haga girar más
+ * (más de una vuelta si se tira bastante) en vez de quedarse siempre en
+ * un mismo medio giro fijo.
  */
 @Composable
 private fun PullStretchIndicator(state: PullToRefreshState, refreshing: Boolean) {
     val pull = state.distanceFraction.coerceIn(0f, 1f)
+    val pullRaw = state.distanceFraction.coerceAtLeast(0f)
+
     val heightFraction by animateFloatAsState(
         targetValue = if (refreshing) 1f else pull,
         animationSpec = AppMotion.effects(),
         label = "pullStretchHeight"
     )
-    val spin by rememberInfiniteTransition(label = "pullSpin").animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
-        label = "pullSpinAngle"
-    )
+
+    // Un solo Animatable para toda la rotación en vez de dos animaciones
+    // independientes (una para "tirando" y un spinner aparte para
+    // "refrescando"): así el giro es siempre el mismo movimiento continuo,
+    // sin el salto que había antes al pasar de un estado al otro.
+    val rotation = remember { Animatable(0f) }
+
+    // Mientras se tira (no refrescando), la rotación seguía al dedo.
+    LaunchedEffect(pullRaw, refreshing) {
+        if (!refreshing) {
+            rotation.animateTo(pullRaw * 360f, animationSpec = AppMotion.effects())
+        }
+    }
+    // Al empezar a refrescar, sigue girando a velocidad constante desde el
+    // ángulo exacto donde quedó (rotation.value ya tiene ese valor).
+    LaunchedEffect(refreshing) {
+        if (refreshing) {
+            while (isActive) {
+                rotation.animateTo(
+                    targetValue = rotation.value + 360f,
+                    animationSpec = tween(durationMillis = 700, easing = LinearEasing)
+                )
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -229,7 +256,7 @@ private fun PullStretchIndicator(state: PullToRefreshState, refreshing: Boolean)
                 modifier = Modifier
                     .size(20.dp)
                     .scale(heightFraction)
-                    .rotate(if (refreshing) spin else heightFraction * 180f)
+                    .rotate(rotation.value % 360f)
             )
         }
     }
