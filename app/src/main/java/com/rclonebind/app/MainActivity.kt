@@ -57,6 +57,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -243,7 +244,7 @@ private fun AppScaffold(vm: BindViewModel) {
                 // horizontal en vertical) ese padding es simétrico y no la
                 // desplaza.
                 modifier = Modifier
-                    .align(Alignment(hBias, vBias))
+                    .align(BiasAlignment(hBias, vBias))
                     .padding(12.dp)
             )
         }
