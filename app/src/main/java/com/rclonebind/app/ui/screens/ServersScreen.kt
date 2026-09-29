@@ -22,7 +22,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
@@ -56,7 +55,16 @@ fun ServersScreen(vm: BindViewModel) {
             title = "Servidores",
             refreshing = vm.refreshing,
             onRefresh = { vm.pullRefresh() },
-            maxContentWidth = if (dualPane) DualPaneContentWidth else null
+            maxContentWidth = if (dualPane) DualPaneContentWidth else null,
+            actions = {
+                // Un solo botón para los dos tipos: el formulario ya deja
+                // elegir FTP o Google Drive con chips al crear uno nuevo, así
+                // que no hace falta un "+" por sección. Va en el mismo lugar
+                // que "Actualizar" en Logs, en vertical y en apaisado.
+                IconButton(onClick = { openNew(RemoteType.FTP) }) {
+                    Icon(Icons.Default.Add, contentDescription = "Agregar servidor")
+                }
+            }
         ) {
             Text(
                 "Toca una tarjeta para elegir el servidor que se monta.",
@@ -65,11 +73,6 @@ fun ServersScreen(vm: BindViewModel) {
             )
             val ftp = vm.profiles.filter { it.type == RemoteType.FTP }
             val drive = vm.profiles.filter { it.type == RemoteType.DRIVE }
-            // Cada tipo es su propia sección con su botón de agregar arriba
-            // (ver ServerPanel): en fila cuando hay ancho de sobra, apiladas
-            // cuando no. Así no hace falta un botón de agregar genérico en
-            // el encabezado que además, en apaisado, quedaría tapado por la
-            // píldora de navegación.
             if (dualPane) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -81,7 +84,6 @@ fun ServersScreen(vm: BindViewModel) {
                         emptyHint = "Agrega un servidor FTP para montarlo como carpeta.",
                         profiles = ftp,
                         selected = vm.activeName,
-                        onAdd = { openNew(RemoteType.FTP) },
                         onSelect = { vm.selectProfile(it) },
                         onEdit = { p -> editTarget = p; showSheet = true },
                         onDelete = { deleteTarget = it }
@@ -92,7 +94,6 @@ fun ServersScreen(vm: BindViewModel) {
                         emptyHint = "Conecta tu cuenta de Google Drive para montarla como carpeta.",
                         profiles = drive,
                         selected = vm.activeName,
-                        onAdd = { openNew(RemoteType.DRIVE) },
                         onSelect = { vm.selectProfile(it) },
                         onEdit = { p -> editTarget = p; showSheet = true },
                         onDelete = { deleteTarget = it }
@@ -109,7 +110,6 @@ fun ServersScreen(vm: BindViewModel) {
                         emptyHint = "Agrega un servidor FTP para montarlo como carpeta.",
                         profiles = ftp,
                         selected = vm.activeName,
-                        onAdd = { openNew(RemoteType.FTP) },
                         onSelect = { vm.selectProfile(it) },
                         onEdit = { p -> editTarget = p; showSheet = true },
                         onDelete = { deleteTarget = it }
@@ -120,7 +120,6 @@ fun ServersScreen(vm: BindViewModel) {
                         emptyHint = "Conecta tu cuenta de Google Drive para montarla como carpeta.",
                         profiles = drive,
                         selected = vm.activeName,
-                        onAdd = { openNew(RemoteType.DRIVE) },
                         onSelect = { vm.selectProfile(it) },
                         onEdit = { p -> editTarget = p; showSheet = true },
                         onDelete = { deleteTarget = it }
@@ -175,9 +174,10 @@ fun ServersScreen(vm: BindViewModel) {
 }
 
 /**
- * Una sección por tipo de remoto (FTP o Google Drive): título con su propio
- * botón de agregar, y debajo su stack de tarjetas (o un aviso si todavía no
- * tiene ningún servidor guardado). En pantallas anchas las dos secciones van
+ * Una sección por tipo de remoto (FTP o Google Drive): título y debajo su
+ * stack de tarjetas (o un aviso si todavía no tiene ningún servidor
+ * guardado). Agregar uno nuevo es un solo botón para los dos tipos, en el
+ * encabezado de [ServersScreen]. En pantallas anchas las dos secciones van
  * en fila; en angostas, apiladas — [ServersScreen] decide el arreglo.
  */
 @Composable
@@ -186,23 +186,13 @@ private fun ServerPanel(
     emptyHint: String,
     profiles: List<RemoteProfile>,
     selected: String?,
-    onAdd: () -> Unit,
     onSelect: (String) -> Unit,
     onEdit: (RemoteProfile) -> Unit,
     onDelete: (RemoteProfile) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(type.label, style = MaterialTheme.typography.titleLarge)
-            IconButton(onClick = onAdd) {
-                Icon(Icons.Default.Add, contentDescription = "Agregar ${type.label}")
-            }
-        }
+        Text(type.label, style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(4.dp))
         if (profiles.isEmpty()) {
             Text(
