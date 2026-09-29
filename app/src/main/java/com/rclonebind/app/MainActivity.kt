@@ -149,8 +149,15 @@ private val PillSpace = 88.dp
 /** Cuánto tiempo se ve la etiqueta de la pestaña activa antes de esconderse (retrato). */
 private const val LabelHideDelayMs = 2000L
 
-/** Alto del degradado que funde el contenido con la barra del sistema. */
+/** Alto del degradado que funde el contenido con la barra del sistema (retrato). */
 private val FadeHeight = 104.dp
+
+/**
+ * En apaisado la pantalla es mucho más baja: el mismo alto de degradado que
+ * en retrato ocupa ahí una porción bastante mayor de la vista y tapa más
+ * tarjetas de las necesarias. Se reduce solo para esa orientación.
+ */
+private val FadeHeightLandscape = 48.dp
 
 @Composable
 private fun AppScaffold(vm: BindViewModel) {
@@ -218,17 +225,16 @@ private fun AppScaffold(vm: BindViewModel) {
 
             // Difuminado inferior: desde la barra de gestos del sistema hacia
             // arriba el contenido se funde con el fondo. Va sobre el pager y
-            // bajo la píldora; no intercepta toques. La barra de gestos vive
-            // pegada abajo en las dos orientaciones (a diferencia de la
-            // píldora, que en apaisado se corre al lateral derecho), así que
-            // este difuminado no depende de isLandscape.
+            // bajo la píldora; no intercepta toques. Más bajo en apaisado
+            // (ver FadeHeightLandscape): la pantalla tiene mucha menos altura
+            // ahí y el mismo alto que en retrato tapaba de más.
             run {
                 val fade = MaterialTheme.colorScheme.background
                 Box(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .height(FadeHeight)
+                        .height(if (isLandscape) FadeHeightLandscape else FadeHeight)
                         .background(
                             Brush.verticalGradient(
                                 0f to Color.Transparent,
