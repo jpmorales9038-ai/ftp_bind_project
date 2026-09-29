@@ -60,6 +60,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.ui.components.LocalContentBottomInset
@@ -250,6 +252,7 @@ private fun FloatingPillNav(
 @Composable
 private fun PillItem(screen: Screen, selected: Boolean, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val haptics = LocalHapticFeedback.current
     val indicator by animateColorAsState(
         if (selected) colors.primary else Color.Transparent, label = "pillIndicator"
     )
@@ -270,7 +273,19 @@ private fun PillItem(screen: Screen, selected: Boolean, onClick: () -> Unit) {
             .defaultMinSize(minWidth = 52.dp)
             .clip(CircleShape)
             .background(indicator)
-            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+            .selectable(
+                selected = selected,
+                role = Role.Tab,
+                onClick = {
+                    // Solo vibra si de verdad cambia de pestaña; volver a
+                    // tocar la ya activa no dispara nada porque no pasa nada.
+                    // SegmentTick es el patrón corto que usa Android para
+                    // saltar entre segmentos/pestañas (distinto del de
+                    // encender/apagar un switch o mantener presionado).
+                    if (!selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    onClick()
+                }
+            )
             .padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
