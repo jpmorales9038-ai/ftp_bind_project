@@ -354,18 +354,48 @@ class BindViewModel : ViewModel() {
             return@launch
         }
         preloadJob?.cancel()
-        preloadJob = launch { watchPreload() }
+        preloadJob = launch { watchPreload(announceIfNeverStarted = true) }
     }
 
-    /** Sondea preload_status.json hasta que termine (o se agote el tiempo de seguridad). */
-    private suspend fun CoroutineScope.watchPreload() {
-        val deadline = SystemClock.elapsedRealtime() + PRELOAD_TIMEOUT_MS
+    /**
+     * Sondea preload_status.json. Antes de esta corrección se rendía en la
+     * primera lectura que no mostrara "running":true — y esa primera
+     * lectura, 1.5s después de lanzar el script, casi siempre llegaba ANTES
+     * de que preload.sh terminara de recorrer el remoto con find (puede
+     * tardar bastante más que eso en un FTP grande o lento) y escribiera su
+     * primer estado. Resultado: tanto el botón manual como el arranque
+     * automático tras montar parecían "no hacer nada", aunque la precarga sí
+     * corriera de verdad en segundo plano.
+     *
+     * Ahora se distingue "todavía no arrancó" (se sigue esperando, hasta
+     * [PRELOAD_START_GRACE_MS]) de "arrancó y ya terminó" (recién ahí se
+     * corta el sondeo). [PRELOAD_TIMEOUT_MS] sigue como red de seguridad por
+     * si algo se queda corriendo para siempre.
+     */
+    private suspend fun CoroutineScope.watchPreload(announceIfNeverStarted: Boolean = false) {
+        val startDeadline = SystemClock.elapsedRealtime() + PRELOAD_START_GRACE_MS
+        val hardDeadline = SystemClock.elapsedRealtime() + PRELOAD_TIMEOUT_MS
+        var everRunning = false
         while (isActive) {
             delay(PRELOAD_POLL_MS)
             val output = withContext(Dispatchers.IO) { RootShell.preloadStatus() }
-            preloadStatus = PreloadStatusParser.parse(output)
-            if (preloadStatus?.running != true) return
-            if (SystemClock.elapsedRealtime() > deadline) return
+            val status = PreloadStatusParser.parse(output)
+            preloadStatus = status
+            val now = SystemClock.elapsedRealtime()
+            if (status?.running == true) {
+                everRunning = true
+            } else if (everRunning) {
+                return // Corría y ya terminó (o falló a medias): se corta acá.
+            } else if (now > startDeadline) {
+                // Nunca llegó a arrancar: perfil/remoto que no cachea lecturas
+                // completas (comportamiento normal), o el script falló antes
+                // de escribir nada.
+                if (announceIfNeverStarted) {
+                    message = "La precarga no llegó a iniciar. Revisa Logs para más detalle."
+                }
+                return
+            }
+            if (now > hardDeadline) return
         }
     }
 
@@ -391,10 +421,11 @@ class BindViewModel : ViewModel() {
         }
         val mounted = isMounted
         val current = mountedRemote
+        val onlyUnmounting = mounted && (current == null || current == target)
         busy = true
         val result = withContext(Dispatchers.IO) {
             when {
-                mounted && (current == null || current == target) -> RootShell.unmount()
+                onlyUnmounting -> RootShell.unmount()
                 mounted -> {
                     // Hay otro servidor montado: se desmonta y se monta el seleccionado.
                     RootShell.unmount()
@@ -406,6 +437,16 @@ class BindViewModel : ViewModel() {
         message = if (result.success) null else "Error: ${result.output.takeLast(200)}"
         reload()
         busy = false
+
+        // mount.sh ya lanzó la precarga sola en segundo plano (ver
+        // preload.sh). Se la sigue desde ya en vez de esperar a que algo
+        // más (un "deslizar para actualizar") la note, porque puede tardar
+        // en arrancar (recorre el remoto con find) y terminar sin que nadie
+        // haya vuelto a leer el estado mientras tanto.
+        if (result.success && !onlyUnmounting) {
+            preloadJob?.cancel()
+            preloadJob = launch { watchPreload() }
+        }
     }
 
     fun setTargetPath(path: String) = viewModelScope.launch {
@@ -523,5 +564,9 @@ class BindViewModel : ViewModel() {
         // (el script en sí no tiene límite de tiempo, sigue en segundo plano).
         const val PRELOAD_POLL_MS = 1500L
         const val PRELOAD_TIMEOUT_MS = 30 * 60_000L
+        // Cuánto se espera a que preload.sh escriba su primer "running":true.
+        // Recorrer el remoto con find (antes de poder escribir nada) puede
+        // tardar bastante en un FTP grande o lento.
+        const val PRELOAD_START_GRACE_MS = 60_000L
     }
 }
