@@ -89,7 +89,7 @@ fun ScreenContainer(
     val resolvedMaxWidth = maxContentWidth ?: adaptiveMaxWidth(screenWidthDp)
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.widthIn(max = resolvedMaxWidth).fillMaxSize()) {
-            if (title != null) ScreenHeader(title, actions)
+            if (title != null) ScreenHeader(title, actions, LocalContentEndInset.current)
             if (onRefresh != null) {
                 PullToRefreshBox(
                     isRefreshing = refreshing,
@@ -140,11 +140,11 @@ private fun adaptiveMaxWidth(screenWidthDp: Int): Dp {
 }
 
 @Composable
-private fun ScreenHeader(title: String, actions: @Composable RowScope.() -> Unit) {
+private fun ScreenHeader(title: String, actions: @Composable RowScope.() -> Unit, endInset: Dp) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 8.dp),
+            .padding(start = 24.dp, end = 12.dp + endInset, top = 12.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
