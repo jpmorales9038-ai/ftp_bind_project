@@ -128,8 +128,25 @@ case "$WORKERS" in ''|*[!0-9]*|0) WORKERS=4 ;; esac
 # Tope de tiempo por archivo: 300 s como mínimo, y 4 s por MB para los
 # grandes (equivale a aguantar hasta ~0,25 MB/s). Un tope fijo cortaba a
 # medias los archivos grandes con enlace lento.
-HAVE_TIMEOUT=0
-command -v timeout >/dev/null 2>&1 && HAVE_TIMEOUT=1
+# Timeout propio en shell puro, sin depender de que el sistema traiga el
+# comando "timeout" (confirmado que este dispositivo no lo tiene: sin esto,
+# un archivo con la conexión trabada dejaba el "cat" corriendo para siempre y
+# con él el worker y el candado, sin que preload_running lo detecte, porque
+# para pgrep ese proceso sigue "vivo" aunque no avance nada). TERM primero;
+# si a los 2s sigue ahí (bloqueado en E/S, donde TERM no siempre alcanza),
+# remata con KILL.
+run_with_timeout() {
+    tl="$1"; shift
+    "$@" &
+    cpid=$!
+    ( sleep "$tl"; kill -TERM "$cpid" 2>/dev/null; sleep 2; kill -KILL "$cpid" 2>/dev/null ) &
+    wpid=$!
+    wait "$cpid" 2>/dev/null
+    rc=$?
+    kill "$wpid" 2>/dev/null
+    wait "$wpid" 2>/dev/null
+    return "$rc"
+}
 
 FILELIST="$MODDIR/.preload_list"
 find "$T" -type f -not -path '*/.rclone-bind-test/*' 2>/dev/null | sort > "$FILELIST"
@@ -217,7 +234,7 @@ preload_worker() {
         t0="$(date +%s)"
         TL=$(( SZ_MB * 4 ))
         [ "$TL" -lt 300 ] && TL=300
-        if { if [ "$HAVE_TIMEOUT" = 1 ]; then timeout "$TL" cat "$f"; else cat "$f"; fi; } > /dev/null 2>>"$LOG_FILE"; then
+        if run_with_timeout "$TL" cat "$f" > /dev/null 2>>"$LOG_FILE"; then
             ok=$(( ok + 1 ))
             echo "$(date): Precarga[$2]: ${f#$T/} (${SZ_MB} MB, $(( $(date +%s) - t0 ))s)" >> "$LOG_FILE"
             # Solo este worker escribe en su propio archivo: sin condiciones

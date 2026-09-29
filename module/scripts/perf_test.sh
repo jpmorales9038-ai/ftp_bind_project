@@ -114,6 +114,25 @@ find_rclone_pid() {
     done
 }
 
+# ¿Hay de verdad un proceso de precarga corriendo? preload.lock es una carpeta
+# (mkdir), y una carpeta no sabe si quien la creó sigue vivo: si el sistema
+# mató preload.sh de un golpe (poca batería, poca memoria) sin dejarlo pasar
+# por su propio trap de limpieza, el candado queda ahí pero nadie está
+# compitiendo por la red. Mismo patrón y mismo respaldo que find_rclone_pid.
+preload_running() {
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -f "$MODDIR/scripts/preload.sh" >/dev/null 2>&1
+        return
+    fi
+    for d in /proc/[0-9]*; do
+        c="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)"
+        case "$c" in
+            *"$MODDIR/scripts/preload.sh"*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 # ---------------------------------------------------------------- mount
 step mount RUN "Comprobando el montaje"
 if ! grep -q '"mounted":true' "$STATUS_FILE" 2>/dev/null; then
@@ -373,9 +392,17 @@ DETAIL="Primera vez $(fmt10 "$CX") MB/s, segunda $(fmt10 "$WX") MB/s, la caché 
 # la caché y no mide la nube).
 PRE_WARN=0
 if [ -d "$MODDIR/preload.lock" ]; then
-    PRE_WARN=1
-    DETAIL="$DETAIL La precarga sigue corriendo y compite por la red: espera a que termine para medir."
-elif [ -f "$MODDIR/config/preload_done_$REMOTE" ]; then
+    if preload_running; then
+        PRE_WARN=1
+        DETAIL="$DETAIL La precarga sigue corriendo y compite por la red: espera a que termine para medir."
+    else
+        # Candado de una precarga que no terminó bien (el sistema la mató sin
+        # avisar): no hay nada compitiendo por la red. Se limpia de una vez
+        # para no depender del próximo montaje para soltarlo.
+        rm -rf "$MODDIR/preload.lock" 2>/dev/null
+    fi
+fi
+if [ "$PRE_WARN" = 0 ] && [ -f "$MODDIR/config/preload_done_$REMOTE" ]; then
     DETAIL="$DETAIL El servidor está precargado: la primera lectura sale de la caché y no mide la velocidad real de la nube."
 fi
 
