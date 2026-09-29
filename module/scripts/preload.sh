@@ -42,29 +42,46 @@ fi
 LOG_FILE="$MODDIR/mount.log"
 STATUS_FILE="$MODDIR/status.json"
 RCLONE_CONF="$MODDIR/config/rclone.conf"
+PRELOAD_STATUS="$MODDIR/preload_status.json"
 
 # Restos de una corrida anterior que no terminó bien (el móvil se reinició a
 # la mitad, por ejemplo). No son el candado: ese se trata aparte.
-rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* "$MODDIR"/.preload_result_* 2>/dev/null
+rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
+      "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done 2>/dev/null
+
+# Escribe preload_status.json de forma atómica (tmp + mv) para que la app,
+# que lo lee mientras corre esta precarga, nunca vea un JSON a medio
+# escribir. $1 = true/false (sigue corriendo), $2 = archivos hechos, $3 = MB hechos.
+write_status() {
+    printf '{"running":%s,"remote":"%s","total_files":%s,"selected_files":%s,"selected_mb":%s,"done_files":%s,"done_mb":%s,"updated":%s}\n' \
+        "$1" "$ACTIVE" "${TOTAL:-0}" "${N_SELECTED:-0}" "${DONE_MB:-0}" "$2" "$3" "$(date +%s)" \
+        > "$PRELOAD_STATUS.tmp" 2>/dev/null && mv "$PRELOAD_STATUS.tmp" "$PRELOAD_STATUS"
+}
 
 # Evita dos precargas a la vez (p. ej. dos montajes seguidos). mount.sh ya
 # limpia este candado antes de lanzar una nueva, así que uno viejo colgado
 # aquí es de un proceso que sigue vivo de verdad.
 LOCK="$MODDIR/preload.lock"
 mkdir "$LOCK" 2>/dev/null || exit 0
-trap 'rm -rf "$LOCK"; rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* "$MODDIR"/.preload_result_*' EXIT INT TERM HUP
+trap '[ -n "$MONITOR_PID" ] && kill "$MONITOR_PID" 2>/dev/null
+      rm -rf "$LOCK"
+      rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
+            "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done' EXIT INT TERM HUP
 
 ACTIVE="$(sed -n 's/.*"remote":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
 T="$(sed -n 's/.*"target":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
-[ -z "$ACTIVE" ] && exit 0
-[ -z "$T" ] || [ ! -d "$T" ] && exit 0
+# Sin remoto o carpeta montada: no hay nada que precargar todavía. Se borra
+# cualquier estado de una precarga anterior para que la app no muestre un
+# progreso que ya no corresponde a este montaje.
+[ -z "$ACTIVE" ] && { rm -f "$PRELOAD_STATUS"; exit 0; }
+if [ -z "$T" ] || [ ! -d "$T" ]; then rm -f "$PRELOAD_STATUS"; exit 0; fi
 
 . "$MODDIR/scripts/perf_opts.sh"
 compute_mount_opts
 
 case "$MOUNT_OPTS" in
     *"--vfs-cache-mode full"*) ;;
-    *) exit 0 ;;
+    *) rm -f "$PRELOAD_STATUS"; exit 0 ;;
 esac
 
 # La caché en RAM (tmpfs) se pierde al desmontar o reiniciar: nunca se puede
@@ -99,25 +116,41 @@ FP_NOW="$TOTAL $(du -sk "$T" 2>/dev/null | awk '{print $1}')"
 
 if [ "$CACHE_IS_RAM" = 0 ] && [ -f "$MARKER" ] && [ "$(cat "$MARKER" 2>/dev/null)" = "$FP_NOW" ]; then
     echo "$(date): Precarga: '$ACTIVE' ya estaba precargado por completo (sin cambios), se omite" >> "$LOG_FILE"
+    N_SELECTED="$TOTAL"
+    DONE_MB="$(( $(printf '%s' "$FP_NOW" | awk '{print $2}') / 1024 ))"
+    write_status false "$TOTAL" "$DONE_MB"
     exit 0
 fi
 
-echo "$(date): Precarga: '$ACTIVE', $TOTAL archivos, hasta ${BUDGET_MB} MB, $WORKERS en paralelo" >> "$LOG_FILE"
+# Tope de archivos por corrida (config/preload_max_files; por defecto 20000,
+# antes fijo en 2000). Un mod grande de GTA o un juego Unity/Unreal con
+# miles de texturas y audios sueltos supera 2000 archivos sin acercarse al
+# presupuesto en MB, así que ese tope viejo dejaba assets sin precargar sin
+# avisar. Sigue habiendo un tope (y no "sin límite") para no recorrer para
+# siempre un remoto ajeno al juego con millones de archivos.
+MAX_FILES="$(cat "$MODDIR/config/preload_max_files" 2>/dev/null)"
+case "$MAX_FILES" in ''|*[!0-9]*|0) MAX_FILES=20000 ;; esac
+[ "$MAX_FILES" -gt 200000 ] && MAX_FILES=200000
+
+echo "$(date): Precarga: '$ACTIVE', $TOTAL archivos, hasta ${BUDGET_MB} MB (tope $MAX_FILES archivos), $WORKERS en paralelo" >> "$LOG_FILE"
 
 # ---- Selección (un solo hilo, sin transferir datos): qué archivos entran
-# en el presupuesto, respetando el mismo tope de 2000 archivos de siempre.
+# en el presupuesto.
 SELECTED="$MODDIR/.preload_selected"
 : > "$SELECTED"
 DONE_MB=0
 N=0
 while IFS= read -r f; do
     N=$(( N + 1 ))
-    [ "$N" -gt 2000 ] && break
+    [ "$N" -gt "$MAX_FILES" ] && break
     SZ_MB=$(( $(stat -c %s "$f" 2>/dev/null || echo 0) / 1048576 ))
     [ $(( DONE_MB + SZ_MB )) -gt "$BUDGET_MB" ] && continue
     DONE_MB=$(( DONE_MB + SZ_MB ))
     printf '%s\n' "$f" >> "$SELECTED"
 done < "$FILELIST"
+N_SELECTED="$(wc -l < "$SELECTED" 2>/dev/null | tr -d ' ')"
+[ -z "$N_SELECTED" ] && N_SELECTED=0
+write_status true 0 0
 
 # ---- Reparto entre workers (round-robin, sin condiciones de carrera: cada
 # archivo va a un único archivo de partición antes de arrancar nada).
@@ -137,12 +170,38 @@ preload_worker() {
         if $LIMIT cat "$f" > /dev/null 2>>"$LOG_FILE"; then
             ok=$(( ok + 1 ))
             echo "$(date): Precarga[$2]: ${f#$T/} (${SZ_MB} MB, $(( $(date +%s) - t0 ))s)" >> "$LOG_FILE"
+            # Solo este worker escribe en su propio archivo: sin condiciones
+            # de carrera entre workers. Lo lee el monitor de progreso.
+            echo "$SZ_MB" >> "$MODDIR/.preload_progress_$2"
         else
             echo "$(date): Precarga[$2]: falló ${f#$T/}" >> "$LOG_FILE"
         fi
     done < "$1"
     echo "$ok" > "$MODDIR/.preload_result_$2"
 }
+
+# Progreso en vivo para la app (SectionCard "Precarga para juegos" en
+# Inicio): suma cada 2s lo que los workers llevan hecho y lo publica en
+# preload_status.json. Corre en paralelo a los workers y se apaga solo al
+# ver .preload_all_done (lo crea este script justo después de "wait").
+(
+    while [ ! -f "$MODDIR/.preload_all_done" ]; do
+        DF=0
+        DMB=0
+        for pf in "$MODDIR"/.preload_progress_*; do
+            [ -f "$pf" ] || continue
+            n="$(wc -l < "$pf" 2>/dev/null | tr -d ' ')"
+            case "$n" in ''|*[!0-9]*) n=0 ;; esac
+            DF=$(( DF + n ))
+            s="$(awk '{sum+=$1} END{print sum+0}' "$pf" 2>/dev/null)"
+            case "$s" in ''|*[!0-9]*) s=0 ;; esac
+            DMB=$(( DMB + s ))
+        done
+        write_status true "$DF" "$DMB"
+        sleep 2
+    done
+) &
+MONITOR_PID=$!
 
 w=0
 while [ "$w" -lt "$WORKERS" ]; do
@@ -151,6 +210,8 @@ while [ "$w" -lt "$WORKERS" ]; do
     w=$(( w + 1 ))
 done
 wait
+touch "$MODDIR/.preload_all_done"
+wait "$MONITOR_PID" 2>/dev/null
 
 PN=0
 for rf in "$MODDIR"/.preload_result_*; do
@@ -159,7 +220,17 @@ for rf in "$MODDIR"/.preload_result_*; do
     case "$v" in ''|*[!0-9]*) ;; *) PN=$(( PN + v )) ;; esac
 done
 
-echo "$(date): Precarga terminada: ${DONE_MB} MB en $PN de $N archivos ($TOTAL en total)" >> "$LOG_FILE"
+# MB realmente bajados (suma final de lo que cada worker fue anotando), no el
+# presupuesto ($DONE_MB de la selección): si algún archivo falló, difieren.
+FINAL_MB=0
+for pf in "$MODDIR"/.preload_progress_*; do
+    [ -f "$pf" ] || continue
+    s="$(awk '{sum+=$1} END{print sum+0}' "$pf" 2>/dev/null)"
+    case "$s" in ''|*[!0-9]*) ;; *) FINAL_MB=$(( FINAL_MB + s )) ;; esac
+done
+write_status false "$PN" "$FINAL_MB"
+
+echo "$(date): Precarga terminada: ${FINAL_MB} de ${DONE_MB} MB, $PN de $N_SELECTED archivos ($TOTAL en total)" >> "$LOG_FILE"
 
 # Marca de "precarga completa" solo si de verdad se cubrió todo el remoto
 # (nada se salteó por presupuesto ni falló). Así el próximo montaje, si nada

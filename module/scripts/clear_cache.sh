@@ -23,7 +23,8 @@ mkdir -p "$CACHE_DIR"
 
 # La caché quedó vacía: ninguna marca de "precarga completa" (preload.sh)
 # sigue siendo válida. Si no se borran, el próximo montaje creería que ya
-# está todo precargado y no bajaría nada.
-rm -f "$MODDIR/config"/preload_done_* 2>/dev/null
+# está todo precargado y no bajaría nada. También se borra el progreso
+# mostrado en la app, que ahora mismo mentiría diciendo "listo".
+rm -f "$MODDIR/config"/preload_done_* "$MODDIR/preload_status.json" 2>/dev/null
 
 echo "OK $BEFORE_KB"

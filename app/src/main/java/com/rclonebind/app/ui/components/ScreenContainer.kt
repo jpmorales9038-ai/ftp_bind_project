@@ -34,13 +34,6 @@ import androidx.compose.ui.unit.dp
 val LocalContentBottomInset = compositionLocalOf { 0.dp }
 
 /**
- * Igual que [LocalContentBottomInset] pero para el borde derecho: en modo
- * apaisado la píldora se muda ahí, así que el contenido reserva ese espacio
- * en vez del inferior.
- */
-val LocalContentEndInset = compositionLocalOf { 0.dp }
-
-/**
  * A partir de este ancho de pantalla hay espacio real para dos columnas
  * (apaisado en casi cualquier celular, o una tablet en cualquier
  * orientación); por debajo, una sola columna apilada. Lo usan Servidores
@@ -83,25 +76,10 @@ fun ScreenContainer(
 ) {
     val scrollState = rememberScrollState()
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
-    val headerMaxWidth = adaptiveMaxWidth(screenWidthDp)
-    val resolvedMaxWidth = maxContentWidth ?: headerMaxWidth
+    val resolvedMaxWidth = maxContentWidth ?: adaptiveMaxWidth(screenWidthDp)
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.widthIn(max = resolvedMaxWidth).fillMaxSize()) {
-            // El encabezado siempre usa el ancho angosto de siempre (el mismo
-            // que Logs), no el de [maxContentWidth]: ese parámetro solo existe
-            // para ensanchar el CUERPO (p. ej. Servidores necesita más ancho
-            // para sus dos paneles uno junto al otro en apaisado). Si el
-            // encabezado heredara ese ancho más grande, sus acciones (como el
-            // botón de agregar) quedarían pegadas al borde real de la
-            // pantalla, mucho más cerca de la píldora de navegación de lo que
-            // están en cualquier otra pantalla.
-            if (title != null) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-                    Box(Modifier.widthIn(max = headerMaxWidth).fillMaxWidth()) {
-                        ScreenHeader(title, actions)
-                    }
-                }
-            }
+            if (title != null) ScreenHeader(title, actions)
             if (onRefresh != null) {
                 PullToRefreshBox(
                     isRefreshing = refreshing,
@@ -131,7 +109,7 @@ private fun ScreenBody(
             .padding(
                 start = 16.dp,
                 top = 8.dp,
-                end = 16.dp + LocalContentEndInset.current,
+                end = 16.dp,
                 bottom = 16.dp + LocalContentBottomInset.current
             ),
         verticalArrangement = Arrangement.spacedBy(16.dp),

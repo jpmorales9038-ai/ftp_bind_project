@@ -19,6 +19,8 @@ object ModulePaths {
     const val RAM_CACHE_FILE = "$CONFIG_DIR/ram_cache"
     const val STATUS_FILE = "$BASE/status.json"
     const val LOG_FILE = "$BASE/mount.log"
+    /** Progreso de la precarga de assets (lo escribe scripts/preload.sh). */
+    const val PRELOAD_STATUS_FILE = "$BASE/preload_status.json"
     /** Salida temporal de `rclone authorize` (contiene el token: se borra al terminar). */
     const val AUTH_OUT = "$BASE/auth.out"
     /** Progreso de la prueba de rendimiento (lo escribe scripts/perf_test.sh). */
@@ -51,6 +53,23 @@ object RootShell {
     fun unmount(): Result = run("sh ${ModulePaths.SCRIPTS}/unmount.sh")
 
     fun status(): Result = run("cat ${ModulePaths.STATUS_FILE} 2>/dev/null || echo '{\"mounted\":false}'")
+
+    // ---- Precarga de assets (perfil Máximo / Drive): ver scripts/preload.sh ----
+
+    /**
+     * Relanza la precarga aunque ya haya una corriendo o recién terminada.
+     * Corta cualquier corrida anterior primero (igual que hace mount.sh al
+     * montar), así sirve tanto para reintentar un fallo como para volver a
+     * comprobar el remoto tras agregar archivos nuevos.
+     */
+    fun preloadStart(): Result = run(
+        "pkill -f ${ModulePaths.SCRIPTS}/preload.sh 2>/dev/null; " +
+            "rm -rf ${ModulePaths.BASE}/preload.lock; " +
+            "nohup sh ${ModulePaths.SCRIPTS}/preload.sh >/dev/null 2>&1 &"
+    )
+
+    fun preloadStatus(): String =
+        Shell.cmd("cat ${ModulePaths.PRELOAD_STATUS_FILE} 2>/dev/null").exec().out.joinToString("\n")
 
     fun tailLog(lines: Int = 200): Result = run("tail -n $lines ${ModulePaths.LOG_FILE} 2>/dev/null")
 

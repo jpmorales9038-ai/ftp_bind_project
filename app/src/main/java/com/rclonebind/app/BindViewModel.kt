@@ -13,12 +13,15 @@ import com.rclonebind.app.root.DriveOptions
 import com.rclonebind.app.root.PerfMode
 import com.rclonebind.app.root.PerfTestParser
 import com.rclonebind.app.root.PerfTestState
+import com.rclonebind.app.root.PreloadStatus
+import com.rclonebind.app.root.PreloadStatusParser
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RootShell
 import com.rclonebind.app.root.cleanHost
 import com.rclonebind.app.root.cleanTargetPath
 import com.rclonebind.app.root.formatCacheKb
 import com.rclonebind.app.root.validateTargetPath
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -36,7 +39,8 @@ private class Snapshot(
     val perfMode: PerfMode,
     val cacheGb: Int?,
     val cacheKb: Long,
-    val ramCache: Boolean
+    val ramCache: Boolean,
+    val preloadRaw: String
 )
 
 class BindViewModel : ViewModel() {
@@ -82,6 +86,9 @@ class BindViewModel : ViewModel() {
     var ramCache by mutableStateOf(false)
         private set
     var perfTest by mutableStateOf(PerfTestState())
+        private set
+    /** Progreso de la precarga de assets a la caché (SectionCard de Inicio en perfil Máximo). Null = no aplica. */
+    var preloadStatus by mutableStateOf<PreloadStatus?>(null)
         private set
     /** Mensaje de una sola vez; la UI lo muestra en un snackbar y lo consume. */
     var message by mutableStateOf<String?>(null)
@@ -129,7 +136,8 @@ class BindViewModel : ViewModel() {
                 perfMode = RootShell.readPerfMode(),
                 cacheGb = RootShell.readCacheGb(),
                 cacheKb = RootShell.cacheSizeKb(),
-                ramCache = RootShell.readRamCache()
+                ramCache = RootShell.readRamCache(),
+                preloadRaw = RootShell.preloadStatus()
             )
         }
 
@@ -155,6 +163,14 @@ class BindViewModel : ViewModel() {
         mountedRemote = if (isMounted) {
             Regex("\"remote\":\"([^\"]*)\"").find(snap.status)?.groupValues?.get(1)
         } else null
+        preloadStatus = PreloadStatusParser.parse(snap.preloadRaw)
+        // mount.sh lanza la precarga sola justo después de montar: si sigue
+        // corriendo (recién montado, o se reabrió la app a mitad de una
+        // precarga larga) y nada la está siguiendo todavía, se retoma el
+        // sondeo para que la barra de progreso avance sola.
+        if (preloadStatus?.running == true && preloadJob?.isActive != true) {
+            preloadJob = viewModelScope.launch { watchPreload() }
+        }
     }
 
     fun selectProfile(name: String) = viewModelScope.launch {
@@ -317,9 +333,46 @@ class BindViewModel : ViewModel() {
         perfTest = PerfTestState()
     }
 
+    private var preloadJob: Job? = null
+
+    /**
+     * Relanza la precarga (scripts/preload.sh) a mano: sirve tanto para
+     * reintentar como para volver a comprobar el remoto después de agregar
+     * archivos nuevos (ya montado, sin tener que desmontar y montar de
+     * nuevo). Mientras corre queda visible en la tarjeta de Inicio; al
+     * terminar en 100% el bind queda tan rápido como el almacenamiento
+     * local para lo que ya se precargó.
+     */
+    fun preloadNow() = viewModelScope.launch {
+        if (!isMounted) {
+            message = "Monta el servidor primero"
+            return@launch
+        }
+        val started = withContext(Dispatchers.IO) { RootShell.preloadStart() }
+        if (!started.success) {
+            message = "No se pudo iniciar la precarga: ${started.output.takeLast(200)}"
+            return@launch
+        }
+        preloadJob?.cancel()
+        preloadJob = launch { watchPreload() }
+    }
+
+    /** Sondea preload_status.json hasta que termine (o se agote el tiempo de seguridad). */
+    private suspend fun CoroutineScope.watchPreload() {
+        val deadline = SystemClock.elapsedRealtime() + PRELOAD_TIMEOUT_MS
+        while (isActive) {
+            delay(PRELOAD_POLL_MS)
+            val output = withContext(Dispatchers.IO) { RootShell.preloadStatus() }
+            preloadStatus = PreloadStatusParser.parse(output)
+            if (preloadStatus?.running != true) return
+            if (SystemClock.elapsedRealtime() > deadline) return
+        }
+    }
+
     override fun onCleared() {
         authJob?.cancel()
         perfJob?.cancel()
+        preloadJob?.cancel()
         super.onCleared()
     }
 
@@ -465,5 +518,10 @@ class BindViewModel : ViewModel() {
         const val PERF_TIMEOUT_MS = 300_000L
         // El script corta a los 300 s; esto es solo la red de seguridad de la app.
         const val AUTH_TIMEOUT_MS = 330_000L
+        // La precarga puede bajar varios GB de assets de juego: se sondea
+        // sin apuro y con un margen amplio antes de dar por perdido el seguimiento
+        // (el script en sí no tiene límite de tiempo, sigue en segundo plano).
+        const val PRELOAD_POLL_MS = 1500L
+        const val PRELOAD_TIMEOUT_MS = 30 * 60_000L
     }
 }

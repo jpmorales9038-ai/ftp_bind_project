@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -20,6 +21,8 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -35,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
 import com.rclonebind.app.ui.components.AppIcons
@@ -83,7 +87,12 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
         title = "Inicio",
         refreshing = vm.refreshing,
         onRefresh = { vm.pullRefresh() },
-        maxContentWidth = if (dualPane) DualPaneContentWidth else null
+        maxContentWidth = if (dualPane) DualPaneContentWidth else null,
+        actions = {
+            IconButton(onClick = { vm.refreshAll() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Actualizar")
+            }
+        }
     ) {
         Surface(
             color = heroColor,
@@ -157,6 +166,9 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                         onRunPerfTest = onRunPerfTest,
                         onRequestRamCache = { showRamCacheConfirm = true }
                     )
+                    if (vm.perfMode == PerfMode.MAX) {
+                        PreloadCard(vm, mounted)
+                    }
                 }
             }
         } else {
@@ -174,6 +186,9 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                 onRunPerfTest = onRunPerfTest,
                 onRequestRamCache = { showRamCacheConfirm = true }
             )
+            if (vm.perfMode == PerfMode.MAX) {
+                PreloadCard(vm, mounted)
+            }
         }
     }
 
@@ -470,6 +485,96 @@ private fun PerfCard(
             TextButton(onClick = { vm.clearCache() }, enabled = !mounted && !vm.busy) {
                 Text("Borrar caché")
             }
+        }
+    }
+}
+
+/**
+ * Progreso de scripts/preload.sh y botón para relanzarlo a mano. Solo se
+ * muestra en perfil Máximo (es el único que cachea lecturas completas de
+ * FTP; Drive las cachea en cualquier perfil, pero el botón manual solo
+ * tiene sentido junto al resto de los controles de rendimiento). El
+ * objetivo: que cuando la barra llegue a 100%, abrir el juego en Winlator o
+ * GameHub lea los assets ya cacheados en el propio teléfono, sin esperar a
+ * la red.
+ */
+@Composable
+private fun PreloadCard(vm: BindViewModel, mounted: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    val status = vm.preloadStatus
+    val hasData = status != null && status.selectedFiles > 0
+
+    SectionCard(
+        title = "Precarga para juegos",
+        icon = AppIcons.Download,
+        subtitle = "Baja los assets del remoto a la caché local antes de abrir el juego. Ya " +
+            "precargados, Winlator y GameHub los leen del teléfono, casi como almacenamiento local."
+    ) {
+        if (!hasData) {
+            Text(
+                if (mounted) {
+                    "Todavía no hay nada precargado. Se hace sola al montar, o tócalo abajo."
+                } else {
+                    "Monta un servidor para poder precargarlo."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = scheme.onSurfaceVariant
+            )
+        } else {
+            val s = status!!
+            val pct = (s.fraction * 100).roundToInt()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    when {
+                        s.running -> "Precargando…"
+                        s.finished -> "Listo"
+                        else -> "Incompleta"
+                    },
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text("$pct%", style = MaterialTheme.typography.titleMedium, color = scheme.primary)
+            }
+            LinearProgressIndicator(
+                progress = { s.fraction },
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))
+            )
+            Text(
+                "${s.doneMb} / ${s.selectedMb} MB · ${s.doneFiles} / ${s.selectedFiles} archivos" +
+                    if (s.totalFiles > s.selectedFiles) " (de ${s.totalFiles} en el remoto)" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant
+            )
+            if (s.finished) {
+                Text(
+                    "Todo en caché local: se comporta como almacenamiento local para lo que ya se precargó.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.primary
+                )
+            } else if (s.totalFiles > s.selectedFiles) {
+                Text(
+                    "El remoto tiene más archivos de los que entran en el tamaño de caché configurado.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant
+                )
+            }
+        }
+
+        FilledTonalButton(
+            onClick = { vm.preloadNow() },
+            enabled = mounted && status?.running != true,
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth().height(56.dp)
+        ) {
+            Icon(AppIcons.Download, contentDescription = null)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (status?.finished == true) "Precargar de nuevo" else "Precargar ahora",
+                style = MaterialTheme.typography.titleMedium
+            )
         }
     }
 }
