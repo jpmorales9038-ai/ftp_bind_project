@@ -1,5 +1,6 @@
 package com.rclonebind.app
 
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -19,6 +20,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -54,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -61,6 +64,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -130,6 +134,15 @@ private fun AppScaffold(vm: BindViewModel) {
     val snackbarHostState = remember { SnackbarHostState() }
     val hazeState = rememberHazeState()
 
+    // No es un ancho de pantalla (eso ya lo maneja cada screen con
+    // BoxWithConstraints para su propio layout de dos columnas): es la
+    // orientación real del teléfono, la que gira la píldora de la barra
+    // inferior a la derecha. android:configChanges en el manifiesto evita
+    // que Android recree la Activity al girar, así esta lectura cambia en
+    // caliente y hay una composición ya en pantalla sobre la que animar en
+    // vez de aparecer ya en su sitio final sin transición.
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     fun goTo(page: Int) {
         scope.launch { pagerState.animateScrollToPage(page) }
     }
@@ -148,15 +161,18 @@ private fun AppScaffold(vm: BindViewModel) {
 
     Scaffold(
         snackbarHost = {
-            SnackbarHost(snackbarHostState, Modifier.padding(bottom = PillSpace))
+            SnackbarHost(snackbarHostState, Modifier.padding(bottom = if (isLandscape) 0.dp else PillSpace))
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             // Deslizar horizontalmente cambia de pestaña. Las 4 páginas se
             // mantienen compuestas para conservar scroll y estado. El pager
-            // ocupa todo el alto (es la fuente del desenfoque): cada pantalla
-            // suma PillSpace a su relleno inferior vía LocalContentBottomInset.
-            CompositionLocalProvider(LocalContentBottomInset provides PillSpace) {
+            // ocupa todo el alto (es la fuente del desenfoque): en modo
+            // retrato cada pantalla suma PillSpace a su relleno inferior vía
+            // LocalContentBottomInset para no quedar tapada por la píldora
+            // flotante; en apaisado la píldora se corre al lateral derecho
+            // y ese relleno extra ya no hace falta.
+            CompositionLocalProvider(LocalContentBottomInset provides if (isLandscape) 0.dp else PillSpace) {
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize().hazeSource(hazeState),
@@ -173,21 +189,43 @@ private fun AppScaffold(vm: BindViewModel) {
 
             // Difuminado inferior: desde la barra de navegación del sistema hacia
             // arriba el contenido se funde con el fondo. Va sobre el pager y bajo
-            // la píldora; no intercepta toques.
-            val fade = MaterialTheme.colorScheme.background
-            Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(FadeHeight)
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            0.35f to fade.copy(alpha = 0.25f),
-                            0.7f to fade.copy(alpha = 0.7f),
-                            1f to fade.copy(alpha = 0.96f)
+            // la píldora; no intercepta toques. Solo tiene sentido pegado abajo,
+            // que es donde vive la píldora en retrato; en apaisado (píldora a la
+            // derecha) no hay nada que fundir ahí y se quita.
+            if (!isLandscape) {
+                val fade = MaterialTheme.colorScheme.background
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(FadeHeight)
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.35f to fade.copy(alpha = 0.25f),
+                                0.7f to fade.copy(alpha = 0.7f),
+                                1f to fade.copy(alpha = 0.96f)
+                            )
                         )
-                    )
+                )
+            }
+
+            // Rebote elástico al mudarse de esquina en vez de un salto seco:
+            // dos springs (uno por eje) hacia el sesgo de la posición
+            // destino. BiasAlignment(0, 1) es abajo centrado (retrato);
+            // BiasAlignment(1, 0) es centrado a la derecha (apaisado). Al
+            // recomponerse con la nueva orientación cambia el objetivo y
+            // ambos springs recorren la distancia con rebote (stiffness
+            // baja) hasta asentarse ahí.
+            val hBias by animateFloatAsState(
+                if (isLandscape) 1f else 0f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                label = "pillNavHBias"
+            )
+            val vBias by animateFloatAsState(
+                if (isLandscape) 0f else 1f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                label = "pillNavVBias"
             )
 
             FloatingPillNav(
@@ -195,18 +233,21 @@ private fun AppScaffold(vm: BindViewModel) {
                 pagerState = pagerState,
                 hazeState = hazeState,
                 onSelect = ::goTo,
+                vertical = isLandscape,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 12.dp)
+                    .align(BiasAlignment(hBias, vBias))
+                    .padding(12.dp)
             )
         }
     }
 }
 
 /**
- * Barra inferior flotante en forma de píldora con fondo desenfocado. Colores
- * del esquema dinámico: fondo primaryContainer (translúcido), indicador primary, contenido onPrimary /
- * onPrimaryContainer. La pestaña activa muestra icono + etiqueta.
+ * Barra flotante en forma de píldora con fondo desenfocado. Colores del
+ * esquema dinámico: fondo primaryContainer (translúcido), indicador
+ * primary, contenido onPrimary / onPrimaryContainer. En retrato es
+ * horizontal y la pestaña activa muestra icono + etiqueta; en apaisado
+ * ([vertical]) se apila a la derecha y va solo con iconos, sin etiquetas.
  */
 @Composable
 private fun FloatingPillNav(
@@ -214,6 +255,7 @@ private fun FloatingPillNav(
     pagerState: PagerState,
     hazeState: HazeState,
     onSelect: (Int) -> Unit,
+    vertical: Boolean,
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
@@ -233,24 +275,42 @@ private fun FloatingPillNav(
         color = Color.Transparent,
         border = BorderStroke(1.dp, colors.onPrimaryContainer.copy(alpha = 0.12f))
     ) {
-        Row(
-            modifier = Modifier.padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            items.forEachIndexed { index, screen ->
-                PillItem(
-                    screen = screen,
-                    selected = pagerState.currentPage == index,
-                    onClick = { onSelect(index) }
-                )
+        if (vertical) {
+            Column(
+                modifier = Modifier.padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                items.forEachIndexed { index, screen ->
+                    PillItem(
+                        screen = screen,
+                        selected = pagerState.currentPage == index,
+                        vertical = true,
+                        onClick = { onSelect(index) }
+                    )
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                items.forEachIndexed { index, screen ->
+                    PillItem(
+                        screen = screen,
+                        selected = pagerState.currentPage == index,
+                        vertical = false,
+                        onClick = { onSelect(index) }
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun PillItem(screen: Screen, selected: Boolean, onClick: () -> Unit) {
+private fun PillItem(screen: Screen, selected: Boolean, vertical: Boolean, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
     val indicator by animateColorAsState(
@@ -267,26 +327,41 @@ private fun PillItem(screen: Screen, selected: Boolean, onClick: () -> Unit) {
         label = "pillIconScale"
     )
 
-    Row(
-        modifier = Modifier
-            .height(52.dp)
-            .defaultMinSize(minWidth = 52.dp)
-            .clip(CircleShape)
-            .background(indicator)
-            .selectable(
-                selected = selected,
-                role = Role.Tab,
-                onClick = {
-                    // Solo vibra si de verdad cambia de pestaña; volver a
-                    // tocar la ya activa no dispara nada porque no pasa nada.
-                    // SegmentTick es el patrón corto que usa Android para
-                    // saltar entre segmentos/pestañas (distinto del de
-                    // encender/apagar un switch o mantener presionado).
-                    if (!selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                    onClick()
-                }
+    val itemModifier = Modifier
+        .let { if (vertical) it.size(52.dp) else it.height(52.dp).defaultMinSize(minWidth = 52.dp) }
+        .clip(CircleShape)
+        .background(indicator)
+        .selectable(
+            selected = selected,
+            role = Role.Tab,
+            onClick = {
+                // Solo vibra si de verdad cambia de pestaña; volver a
+                // tocar la ya activa no dispara nada porque no pasa nada.
+                // SegmentTick es el patrón corto que usa Android para
+                // saltar entre segmentos/pestañas (distinto del de
+                // encender/apagar un switch o mantener presionado).
+                if (!selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                onClick()
+            }
+        )
+
+    // En apaisado va solo el icono, sin etiqueta ni aunque esté
+    // seleccionada: no hay ancho sobrante en una barra vertical angosta
+    // para desplegar texto al lado sin desbordar la pantalla.
+    if (vertical) {
+        Box(itemModifier, contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = if (selected) screen.filledIcon else screen.outlinedIcon,
+                contentDescription = screen.label,
+                tint = content,
+                modifier = Modifier.size(26.dp).scale(iconScale)
             )
-            .padding(horizontal = 14.dp),
+        }
+        return
+    }
+
+    Row(
+        modifier = itemModifier.padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
