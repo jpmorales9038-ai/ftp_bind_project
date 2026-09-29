@@ -1,15 +1,15 @@
 #!/system/bin/sh
-# Precarga automática: tras un montaje correcto, si el perfil cachea
-# lecturas completas (Máximo, o Google Drive en cualquier perfil), baja a la
+# Precarga automática: tras un montaje correcto en perfil Máximo, baja a la
 # caché los archivos del remoto montado. Así, cuando el juego (u otra app)
 # los abra por primera vez, ya están locales en vez de tener que esperar la
 # descarga en ese momento.
 #
 # La lanza mount.sh en segundo plano justo después de "montado
-# correctamente"; no bloquea eso ni el resto del arranque. No hace nada si
-# el perfil activo no cachea lecturas completas (FTP en Equilibrado): ahí
-# leer un archivo entero no deja nada permanente en caché, sería red
-# desperdiciada.
+# correctamente"; no bloquea eso ni el resto del arranque. No hace nada fuera
+# de Máximo: en Equilibrado, Google Drive también monta con caché completa
+# (para que un archivo se sirva entero en vez de a saltos), pero la tarjeta
+# de precarga está oculta ahí y no tiene sentido bajar de antemano lo que el
+# usuario no pidió.
 #
 # Descarga en paralelo (scripts/config/preload_workers, por defecto 4,
 # tope 8): cada "cat" abre su propia conexión, así que leer varios archivos
@@ -94,6 +94,14 @@ if [ -z "$T" ] || [ ! -d "$T" ]; then rm -f "$PRELOAD_STATUS"; exit 0; fi
 
 . "$MODDIR/scripts/perf_opts.sh"
 compute_mount_opts
+
+# Solo en Máximo: en Equilibrado, Drive monta con --vfs-cache-mode full igual
+# (ver perf_opts.sh), pero la tarjeta de precarga está oculta para ese
+# perfil y bajar archivos por adelantado ahí sería red que el usuario no pidió.
+if [ "$PERF" != "max" ]; then
+    rm -f "$PRELOAD_STATUS"
+    exit 0
+fi
 
 case "$MOUNT_OPTS" in
     *"--vfs-cache-mode full"*) ;;

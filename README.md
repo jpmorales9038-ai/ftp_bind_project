@@ -66,7 +66,7 @@ sequenceDiagram
 - Cada servidor es una tarjeta; la seleccionada se abre y las demás asoman su franja.
 - Tocar una tarjeta elige cuál se monta. Agregar, editar y eliminar desde la misma pantalla.
 - Compatible con **FTP** y **Google Drive**.
-- En pantalla ancha (apaisado, tablets) se ven **dos paneles uno al lado del otro**, uno por tipo de remoto, cada uno con su propio botón de agregar; en vertical siguen mezclados en una sola pila, como siempre.
+- En pantalla ancha (apaisado, tablets) se ven **dos paneles uno al lado del otro**, uno por tipo de remoto; en vertical siguen mezclados en una sola pila, como siempre.
 - Las contraseñas se guardan ofuscadas con `rclone obscure`.
 - Al editar, dejar la contraseña vacía conserva la anterior.
 
