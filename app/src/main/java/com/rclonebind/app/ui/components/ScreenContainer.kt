@@ -1,5 +1,10 @@
 package com.rclonebind.app.ui.components
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,22 +14,33 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.rclonebind.app.ui.theme.AppMotion
 
 /**
  * Espacio inferior que ocupa la barra flotante. Las pantallas lo suman a su
@@ -87,20 +103,22 @@ fun ScreenContainer(
     val scrollState = rememberScrollState()
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     val resolvedMaxWidth = maxContentWidth ?: adaptiveMaxWidth(screenWidthDp)
+    val pullState = if (onRefresh != null) rememberPullToRefreshState() else null
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.widthIn(max = resolvedMaxWidth).fillMaxSize()) {
-            if (title != null) ScreenHeader(title, actions, LocalContentEndInset.current)
-            if (onRefresh != null) {
-                PullToRefreshBox(
-                    isRefreshing = refreshing,
-                    onRefresh = onRefresh,
-                    modifier = Modifier.weight(1f).fillMaxWidth()
-                ) {
-                    ScreenBody(Modifier, scroll, scrollState, content)
+        Column(
+            Modifier
+                .widthIn(max = resolvedMaxWidth)
+                .fillMaxSize()
+                .let { base ->
+                    if (pullState != null && onRefresh != null) {
+                        base.pullToRefresh(isRefreshing = refreshing, state = pullState, onRefresh = onRefresh)
+                    } else base
                 }
-            } else {
-                ScreenBody(Modifier.weight(1f).fillMaxWidth(), scroll, scrollState, content)
+        ) {
+            if (title != null) {
+                ScreenHeader(title, actions, LocalContentEndInset.current, pullState, refreshing)
             }
+            ScreenBody(Modifier.weight(1f).fillMaxWidth(), scroll, scrollState, content)
         }
     }
 }
@@ -140,20 +158,78 @@ private fun adaptiveMaxWidth(screenWidthDp: Int): Dp {
 }
 
 @Composable
-private fun ScreenHeader(title: String, actions: @Composable RowScope.() -> Unit, endInset: Dp) {
-    Row(
+private fun ScreenHeader(
+    title: String,
+    actions: @Composable RowScope.() -> Unit,
+    endInset: Dp,
+    pullState: PullToRefreshState?,
+    refreshing: Boolean
+) {
+    Column {
+        if (pullState != null) {
+            PullStretchIndicator(pullState, refreshing)
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 24.dp, end = 12.dp + endInset, top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.displaySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            actions()
+        }
+    }
+}
+
+/** Cuánto "estira" como máximo el encabezado al tirar del contenido hacia abajo. */
+private val PullStretchMaxHeight = 32.dp
+
+/**
+ * Reemplaza al spinner de Material3 (que aparece flotando sobre el
+ * contenido y solo se nota una vez que ya se scrolleó hasta arriba de
+ * todo). Este vive siempre pegado al encabezado: a medida que se tira del
+ * contenido hacia abajo, el encabezado "se estira" (crece este espacio de
+ * arriba) y el ícono aparece agrandándose y girando con la propia tracción
+ * del dedo; al soltar pasado el umbral, sigue girando solo mientras
+ * refresca. [PullToRefreshState.distanceFraction] ya viene en 0f..1f+
+ * (puede pasarse de 1 si se tira de más), así que alcanza con acotarlo.
+ */
+@Composable
+private fun PullStretchIndicator(state: PullToRefreshState, refreshing: Boolean) {
+    val pull = state.distanceFraction.coerceIn(0f, 1f)
+    val heightFraction by animateFloatAsState(
+        targetValue = if (refreshing) 1f else pull,
+        animationSpec = AppMotion.effects(),
+        label = "pullStretchHeight"
+    )
+    val spin by rememberInfiniteTransition(label = "pullSpin").animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
+        label = "pullSpinAngle"
+    )
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 24.dp, end = 12.dp + endInset, top = 12.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .height(PullStretchMaxHeight * heightFraction),
+        contentAlignment = Alignment.BottomCenter
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.displaySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
-        actions()
+        if (heightFraction > 0.05f) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .size(20.dp)
+                    .scale(heightFraction)
+                    .rotate(if (refreshing) spin else heightFraction * 180f)
+            )
+        }
     }
 }
