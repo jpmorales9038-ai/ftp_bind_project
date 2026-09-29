@@ -50,6 +50,13 @@ PRELOAD_STATUS="$MODDIR/preload_status.json"
 rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
       "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done 2>/dev/null
 
+# Tamaño de un archivo en MB enteros. Se calcula con awk y no con $(( )): el
+# mksh de Android hace la aritmética en 32 bits con signo, y un archivo de más
+# de 2 GiB daba MB negativos (p. ej. -1581 para uno de 2515 MB).
+file_mb() {
+    stat -c %s "$1" 2>/dev/null | awk '{printf "%d", $1 / 1048576}'
+}
+
 # Escribe preload_status.json de forma atómica (tmp + mv) para que la app,
 # que lo lee mientras corre esta precarga, nunca vea un JSON a medio
 # escribir. $1 = true/false (sigue corriendo), $2 = archivos hechos, $3 = MB hechos.
@@ -168,7 +175,7 @@ N=0
 while IFS= read -r f; do
     N=$(( N + 1 ))
     [ "$N" -gt "$MAX_FILES" ] && break
-    SZ_MB=$(( $(stat -c %s "$f" 2>/dev/null || echo 0) / 1048576 ))
+    SZ_MB="$(file_mb "$f")"; [ -z "$SZ_MB" ] && SZ_MB=0
     [ $(( DONE_MB + SZ_MB )) -gt "$BUDGET_MB" ] && continue
     DONE_MB=$(( DONE_MB + SZ_MB ))
     printf '%s\n' "$f" >> "$SELECTED"
@@ -190,7 +197,7 @@ preload_worker() {
     # $1 = archivo con las rutas de este worker; $2 = número del worker (solo para el log)
     ok=0
     while IFS= read -r f; do
-        SZ_MB=$(( $(stat -c %s "$f" 2>/dev/null || echo 0) / 1048576 ))
+        SZ_MB="$(file_mb "$f")"; [ -z "$SZ_MB" ] && SZ_MB=0
         t0="$(date +%s)"
         TL=$(( SZ_MB * 4 ))
         [ "$TL" -lt 300 ] && TL=300

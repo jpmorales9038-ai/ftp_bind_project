@@ -304,7 +304,9 @@ if [ -z "$F" ]; then
     finish
 fi
 
-SIZE_MB=$(( $(stat -c %s "$F" 2>/dev/null || echo 0) / 1048576 ))
+SIZE_MB="$(stat -c %s "$F" 2>/dev/null | awk '{printf "%d", $1 / 1048576}')"
+# (awk y no $(( )): el mksh de Android usa 32 bits y desbordaba con archivos de más de 2 GiB)
+[ -z "$SIZE_MB" ] && SIZE_MB=0
 MAXSKIP=$(( SIZE_MB - TEST_MB ))
 [ "$MAXSKIP" -lt 0 ] && MAXSKIP=0
 # Tramo al azar del archivo: uno ya leído antes estaría en la caché de rclone y
