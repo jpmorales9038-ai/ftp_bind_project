@@ -69,6 +69,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.ui.components.LocalContentBottomInset
+import com.rclonebind.app.ui.components.LocalContentEndInset
 import com.rclonebind.app.ui.screens.AboutScreen
 import com.rclonebind.app.ui.screens.HomeScreen
 import com.rclonebind.app.ui.screens.LogsScreen
@@ -172,7 +173,10 @@ private fun AppScaffold(vm: BindViewModel) {
             // LocalContentBottomInset para no quedar tapada por la píldora
             // flotante; en apaisado la píldora se corre al lateral derecho
             // y ese relleno extra ya no hace falta.
-            CompositionLocalProvider(LocalContentBottomInset provides if (isLandscape) 0.dp else PillSpace) {
+            CompositionLocalProvider(
+                LocalContentBottomInset provides if (isLandscape) 0.dp else PillSpace,
+                LocalContentEndInset provides if (isLandscape) PillSpace else 0.dp
+            ) {
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize().hazeSource(hazeState),

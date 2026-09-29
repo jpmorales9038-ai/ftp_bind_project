@@ -34,6 +34,16 @@ import androidx.compose.ui.unit.dp
 val LocalContentBottomInset = compositionLocalOf { 0.dp }
 
 /**
+ * Espacio a la derecha que ocupa la píldora cuando se mueve a ese costado
+ * (apaisado). En retrato vale 0 (ahí el espacio lo reserva el inset
+ * inferior de arriba). Lo aplica [ScreenContainer] en las 4 pantallas por
+ * igual, así que ninguna pantalla necesita saber de la píldora por su
+ * cuenta: antes, Inicio y Servidores (las que usan más ancho en apaisado
+ * con su doble panel) quedaban con contenido tapado detrás de la píldora.
+ */
+val LocalContentEndInset = compositionLocalOf { 0.dp }
+
+/**
  * A partir de este ancho de pantalla hay espacio real para dos columnas
  * (apaisado en casi cualquier celular, o una tablet en cualquier
  * orientación); por debajo, una sola columna apilada. Lo usan Servidores
@@ -109,7 +119,7 @@ private fun ScreenBody(
             .padding(
                 start = 16.dp,
                 top = 8.dp,
-                end = 16.dp,
+                end = 16.dp + LocalContentEndInset.current,
                 bottom = 16.dp + LocalContentBottomInset.current
             ),
         verticalArrangement = Arrangement.spacedBy(16.dp),

@@ -77,7 +77,6 @@ fun ServersScreen(vm: BindViewModel) {
                         emptyHint = "Agrega un servidor FTP para montarlo como carpeta.",
                         profiles = ftp,
                         selected = vm.activeName,
-                        onAdd = { openNew(RemoteType.FTP) },
                         onSelect = { vm.selectProfile(it) },
                         onEdit = { p -> editTarget = p; showSheet = true },
                         onDelete = { deleteTarget = it }
@@ -88,7 +87,6 @@ fun ServersScreen(vm: BindViewModel) {
                         emptyHint = "Conecta tu cuenta de Google Drive para montarla como carpeta.",
                         profiles = drive,
                         selected = vm.activeName,
-                        onAdd = { openNew(RemoteType.DRIVE) },
                         onSelect = { vm.selectProfile(it) },
                         onEdit = { p -> editTarget = p; showSheet = true },
                         onDelete = { deleteTarget = it }
@@ -177,23 +175,13 @@ private fun ServerPanel(
     emptyHint: String,
     profiles: List<RemoteProfile>,
     selected: String?,
-    onAdd: () -> Unit,
     onSelect: (String) -> Unit,
     onEdit: (RemoteProfile) -> Unit,
     onDelete: (RemoteProfile) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(type.label, style = MaterialTheme.typography.titleLarge)
-            IconButton(onClick = onAdd) {
-                Icon(Icons.Default.Add, contentDescription = "Agregar ${type.label}")
-            }
-        }
+        Text(type.label, style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(4.dp))
         if (profiles.isEmpty()) {
             Text(
