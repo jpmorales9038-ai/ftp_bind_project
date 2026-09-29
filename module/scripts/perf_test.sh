@@ -165,21 +165,38 @@ case "$CUR" in
 esac
 NMISS=0
 SHORT=""
-flag=""
-for w in $MOUNT_OPTS; do
-    case "$w" in
-        --*) flag="$w" ;;
+miss() {
+    NMISS=$(( NMISS + 1 ))
+    # Solo se nombran las tres primeras para que el texto quepa en pantalla.
+    if [ "$NMISS" -le 3 ]; then
+        if [ -z "$SHORT" ]; then SHORT="$1"; else SHORT="$SHORT, $1"; fi
+    fi
+}
+
+# set -- + shift en vez de "for w in $MOUNT_OPTS": hace falta mirar el
+# token SIGUIENTE a cada "--flag" para saber si es su valor o si en
+# realidad es la flag booleana siguiente (--vfs-fast-fingerprint, en el
+# perfil Máximo, no lleva valor). Con el "for" de antes esa flag booleana
+# nunca se llegaba a comprobar: el "--flag" de al lado la pisaba como si
+# fuera su valor antes de que el chequeo la mirara.
+set -- $MOUNT_OPTS
+while [ "$#" -gt 0 ]; do
+    flag="$1"
+    case "$2" in
+        ''|--*)
+            # Booleana: sin valor, se busca la flag sola.
+            case "$CUR" in
+                *" $flag "*) ;;
+                *) miss "$flag" ;;
+            esac
+            shift
+            ;;
         *)
             case "$CUR" in
-                *" $flag $w "*) ;;
-                *)
-                    NMISS=$(( NMISS + 1 ))
-                    # Solo se nombran las tres primeras para que el texto quepa en pantalla.
-                    if [ "$NMISS" -le 3 ]; then
-                        if [ -z "$SHORT" ]; then SHORT="$flag"; else SHORT="$SHORT, $flag"; fi
-                    fi
-                    ;;
+                *" $flag $2 "*) ;;
+                *) miss "$flag" ;;
             esac
+            shift 2
             ;;
     esac
 done
