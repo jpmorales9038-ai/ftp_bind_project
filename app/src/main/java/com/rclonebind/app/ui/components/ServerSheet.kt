@@ -53,7 +53,6 @@ import com.rclonebind.app.root.DriveOptions
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RemoteType
 import com.rclonebind.app.root.cleanHost
-import com.rclonebind.app.root.extractDriveFolderId
 import com.rclonebind.app.root.normalizeToken
 import com.rclonebind.app.root.validateProfileName
 import kotlinx.coroutines.CancellationException
@@ -68,10 +67,6 @@ import kotlinx.coroutines.launch
 @Composable
 fun ServerSheet(
     initial: RemoteProfile?,
-    // Solo aplica cuando initial es null (servidor nuevo): qué chip queda
-    // marcado al abrir. Por ejemplo, el panel de Google Drive en el doble
-    // panel de Servidores abre el formulario ya en Drive en vez de FTP.
-    initialType: RemoteType = RemoteType.FTP,
     existingNames: List<String>,
     driveAuth: DriveAuthState,
     onDriveLogin: (clientId: String, clientSecret: String) -> Unit,
@@ -90,7 +85,7 @@ fun ServerSheet(
     var hostError by remember { mutableStateOf<String?>(null) }
     var portError by remember { mutableStateOf<String?>(null) }
 
-    var type by remember { mutableStateOf(initial?.type ?: initialType) }
+    var type by remember { mutableStateOf(initial?.type ?: RemoteType.FTP) }
 
     // Estado de Google Drive
     val initialDrive = initial?.drive
@@ -104,7 +99,6 @@ fun ServerSheet(
     var readOnly by remember { mutableStateOf(initialDrive?.readOnly ?: false) }
     var rootFolder by remember { mutableStateOf(initialDrive?.rootFolderId ?: "") }
     var teamDrive by remember { mutableStateOf(initialDrive?.teamDrive ?: "") }
-    var acknowledgeAbuse by remember { mutableStateOf(initialDrive?.acknowledgeAbuse ?: false) }
     var showAdvanced by remember { mutableStateOf(false) }
     var showManual by remember { mutableStateOf(false) }
     var manualToken by remember { mutableStateOf("") }
@@ -407,27 +401,11 @@ fun ServerSheet(
                     Text(if (showAdvanced) "Ocultar opciones avanzadas" else "Opciones avanzadas")
                 }
                 if (showAdvanced) {
-                    Row(
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                            Text("Permitir archivos marcados como malware", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "Descarga archivos que Google Drive bloquea como malware o spam " +
-                                    "(error 403 cannotDownloadAbusiveFile). Actívalo solo si confías en el contenido.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(checked = acknowledgeAbuse, onCheckedChange = { acknowledgeAbuse = it })
-                    }
                     OutlinedTextField(
                         value = rootFolder,
-                        onValueChange = { rootFolder = extractDriveFolderId(it) },
+                        onValueChange = { rootFolder = it },
                         label = { Text("ID de carpeta raíz (opcional)") },
-                        supportingText = { Text("Monta solo esa carpeta en vez de todo Mi unidad. Puedes pegar el link para compartir: se toma solo el ID.") },
+                        supportingText = { Text("Monta solo esa carpeta en vez de todo Mi unidad.") },
                         singleLine = true,
                         shape = MaterialTheme.shapes.large,
                         modifier = Modifier.fillMaxWidth()
@@ -532,8 +510,7 @@ fun ServerSheet(
                                     clientSecret = effectiveClientSecret,
                                     readOnly = readOnly,
                                     rootFolderId = rootFolder.trim(),
-                                    teamDrive = teamDrive.trim(),
-                                    acknowledgeAbuse = acknowledgeAbuse
+                                    teamDrive = teamDrive.trim()
                                 )
                             )
                         }

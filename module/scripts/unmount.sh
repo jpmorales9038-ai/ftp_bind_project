@@ -39,17 +39,5 @@ umount -l "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || "$MODDIR/bin/fusermount3" -u "$
 # Por si el mount corre como proceso en background
 pkill -f "$MODDIR/bin/rclone mount" 2>/dev/null
 
-# Corta la precarga automática si seguía corriendo: el mount ya no existe,
-# seguir leyendo archivos ahí solo daría errores.
-pkill -f "$MODDIR/scripts/preload.sh" 2>/dev/null
-rm -rf "$MODDIR/preload.lock" "$MODDIR/.preload_list"
-
-# Libera la RAM de la caché en RAM (si estaba activa): el tmpfs es
-# descartable, así que basta con desmontarlo.
-RAM_CACHE_DIR="$MODDIR/cache_ram"
-if grep -q " $RAM_CACHE_DIR tmpfs" /proc/mounts; then
-    umount -l "$RAM_CACHE_DIR" 2>>"$LOG_FILE"
-fi
-
 echo '{"mounted":false}' > "$STATUS_FILE"
 echo "$(date): Desmontado" >> "$LOG_FILE"

@@ -1,16 +1,14 @@
 package com.rclonebind.app.ui.screens
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,12 +26,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
 import com.rclonebind.app.root.RemoteProfile
-import com.rclonebind.app.root.RemoteType
-import com.rclonebind.app.ui.components.DualPaneContentWidth
+import com.rclonebind.app.ui.components.LocalContentBottomInset
 import com.rclonebind.app.ui.components.ScreenContainer
 import com.rclonebind.app.ui.components.ServerCardStack
 import com.rclonebind.app.ui.components.ServerSheet
-import com.rclonebind.app.ui.components.rememberIsDualPane
 
 @Composable
 fun ServersScreen(vm: BindViewModel) {
@@ -41,66 +37,31 @@ fun ServersScreen(vm: BindViewModel) {
 
     var showSheet by remember { mutableStateOf(false) }
     var editTarget by remember { mutableStateOf<RemoteProfile?>(null) }
-    var newProfileType by remember { mutableStateOf(RemoteType.FTP) }
     var deleteTarget by remember { mutableStateOf<RemoteProfile?>(null) }
 
-    fun openNew(type: RemoteType = RemoteType.FTP) {
+    val openNew = {
         editTarget = null
-        newProfileType = type
         showSheet = true
     }
-
-    val dualPane = rememberIsDualPane()
 
     Box(Modifier.fillMaxSize()) {
         ScreenContainer(
             title = "Servidores",
             refreshing = vm.refreshing,
             onRefresh = { vm.pullRefresh() },
-            maxContentWidth = if (dualPane) DualPaneContentWidth else null,
             actions = {
-                IconButton(onClick = { openNew() }) {
+                IconButton(onClick = openNew) {
                     Icon(Icons.Default.Add, contentDescription = "Agregar servidor")
                 }
             }
         ) {
-            if (dualPane) {
-                val ftp = vm.profiles.filter { it.type == RemoteType.FTP }
-                val drive = vm.profiles.filter { it.type == RemoteType.DRIVE }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(24.dp)
-                ) {
-                    ServerPanel(
-                        modifier = Modifier.weight(1f),
-                        type = RemoteType.FTP,
-                        emptyHint = "Agrega un servidor FTP para montarlo como carpeta.",
-                        profiles = ftp,
-                        selected = vm.activeName,
-                        onAdd = { openNew(RemoteType.FTP) },
-                        onSelect = { vm.selectProfile(it) },
-                        onEdit = { p -> editTarget = p; showSheet = true },
-                        onDelete = { deleteTarget = it }
-                    )
-                    ServerPanel(
-                        modifier = Modifier.weight(1f),
-                        type = RemoteType.DRIVE,
-                        emptyHint = "Conecta tu cuenta de Google Drive para montarla como carpeta.",
-                        profiles = drive,
-                        selected = vm.activeName,
-                        onAdd = { openNew(RemoteType.DRIVE) },
-                        onSelect = { vm.selectProfile(it) },
-                        onEdit = { p -> editTarget = p; showSheet = true },
-                        onDelete = { deleteTarget = it }
-                    )
-                }
-            } else if (vm.profiles.isEmpty()) {
+            if (vm.profiles.isEmpty()) {
                 Text(
                     "Todavía no hay servidores guardados. Agrega un servidor FTP o tu Google Drive para montarlo como carpeta en tu almacenamiento.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                FilledTonalButton(onClick = { openNew() }) { Text("Agregar servidor") }
+                FilledTonalButton(onClick = openNew) { Text("Agregar servidor") }
             } else {
                 Text(
                     "Toca una tarjeta para elegir el servidor que se monta.",
@@ -124,7 +85,6 @@ fun ServersScreen(vm: BindViewModel) {
     if (showSheet) {
         ServerSheet(
             initial = editTarget,
-            initialType = newProfileType,
             existingNames = vm.profiles.map { it.name },
             driveAuth = vm.driveAuth,
             onDriveLogin = { clientId, clientSecret -> vm.startDriveLogin(clientId, clientSecret) },
@@ -162,53 +122,5 @@ fun ServersScreen(vm: BindViewModel) {
                 TextButton(onClick = { deleteTarget = null }) { Text("Cancelar") }
             }
         )
-    }
-}
-
-/**
- * Una columna del doble panel: título del tipo de remoto con su propio
- * botón de agregar, y debajo su stack (o un aviso si todavía no tiene
- * ningún servidor guardado). Solo se usa en pantallas anchas; en vertical
- * los servidores de ambos tipos se ven mezclados en un único stack.
- */
-@Composable
-private fun ServerPanel(
-    type: RemoteType,
-    emptyHint: String,
-    profiles: List<RemoteProfile>,
-    selected: String?,
-    onAdd: () -> Unit,
-    onSelect: (String) -> Unit,
-    onEdit: (RemoteProfile) -> Unit,
-    onDelete: (RemoteProfile) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(type.label, style = MaterialTheme.typography.titleLarge)
-            IconButton(onClick = onAdd) {
-                Icon(Icons.Default.Add, contentDescription = "Agregar ${type.label}")
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        if (profiles.isEmpty()) {
-            Text(
-                emptyHint,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            ServerCardStack(
-                profiles = profiles,
-                selected = selected,
-                onSelect = onSelect,
-                onEdit = onEdit,
-                onDelete = onDelete
-            )
-        }
     }
 }

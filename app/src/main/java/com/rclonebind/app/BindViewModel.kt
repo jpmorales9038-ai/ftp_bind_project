@@ -10,14 +10,10 @@ import com.rclonebind.app.root.DEFAULT_TARGET_PATH
 import com.rclonebind.app.root.DriveAuthParser
 import com.rclonebind.app.root.DriveAuthState
 import com.rclonebind.app.root.DriveOptions
-import com.rclonebind.app.root.PerfMode
-import com.rclonebind.app.root.PerfTestParser
-import com.rclonebind.app.root.PerfTestState
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RootShell
 import com.rclonebind.app.root.cleanHost
 import com.rclonebind.app.root.cleanTargetPath
-import com.rclonebind.app.root.formatCacheKb
 import com.rclonebind.app.root.validateTargetPath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,11 +28,7 @@ private class Snapshot(
     val active: String?,
     val status: String,
     val autostart: Boolean,
-    val targetPath: String,
-    val perfMode: PerfMode,
-    val cacheGb: Int?,
-    val cacheKb: Long,
-    val ramCache: Boolean
+    val targetPath: String
 )
 
 class BindViewModel : ViewModel() {
@@ -57,15 +49,6 @@ class BindViewModel : ViewModel() {
     /** Ruta donde queda visible el bind (editable desde Inicio). */
     var targetPath by mutableStateOf(DEFAULT_TARGET_PATH)
         private set
-    /** Perfil de rendimiento del montaje (Equilibrado o Máximo). */
-    var perfMode by mutableStateOf(PerfMode.BALANCED)
-        private set
-    /** Tamaño de caché elegido en GB; null = el que trae el perfil. */
-    var cacheGb by mutableStateOf<Int?>(null)
-        private set
-    /** Tamaño actual de la caché en disco (KB), para mostrarlo junto al botón de borrarla. */
-    var cacheKb by mutableStateOf(0L)
-        private set
     /** Servidor seleccionado: el que usa el botón Montar. */
     var activeName by mutableStateOf<String?>(null)
         private set
@@ -76,12 +59,6 @@ class BindViewModel : ViewModel() {
         private set
     /** Progreso del inicio de sesión con Google (lo muestra el formulario de servidor). */
     var driveAuth by mutableStateOf<DriveAuthState>(DriveAuthState.Idle)
-        private set
-    /** Prueba de rendimiento: la muestra PerfTestSheet. */
-    /** Caché en RAM del perfil Máximo (config/ram_cache); mount.sh decide si hay memoria para cumplirlo. */
-    var ramCache by mutableStateOf(false)
-        private set
-    var perfTest by mutableStateOf(PerfTestState())
         private set
     /** Mensaje de una sola vez; la UI lo muestra en un snackbar y lo consume. */
     var message by mutableStateOf<String?>(null)
@@ -125,11 +102,7 @@ class BindViewModel : ViewModel() {
                 active = RootShell.readActive(),
                 status = RootShell.status().output,
                 autostart = RootShell.readAutostart(),
-                targetPath = RootShell.readTargetPath(),
-                perfMode = RootShell.readPerfMode(),
-                cacheGb = RootShell.readCacheGb(),
-                cacheKb = RootShell.cacheSizeKb(),
-                ramCache = RootShell.readRamCache()
+                targetPath = RootShell.readTargetPath()
             )
         }
 
@@ -147,10 +120,6 @@ class BindViewModel : ViewModel() {
         activeName = active
         autostart = snap.autostart
         targetPath = snap.targetPath
-        perfMode = snap.perfMode
-        cacheGb = snap.cacheGb
-        cacheKb = snap.cacheKb
-        ramCache = snap.ramCache
         isMounted = snap.status.contains("\"mounted\":true")
         mountedRemote = if (isMounted) {
             Regex("\"remote\":\"([^\"]*)\"").find(snap.status)?.groupValues?.get(1)
@@ -269,57 +238,8 @@ class BindViewModel : ViewModel() {
         driveAuth = DriveAuthState.Idle
     }
 
-    private var perfJob: Job? = null
-
-    /**
-     * Lanza la prueba de rendimiento y va leyendo su progreso. Al terminar, o si
-     * se cancela, mata el script por si sigue vivo (y así se borra el archivo
-     * temporal que haya dejado en la carpeta montada).
-     */
-    fun startPerfTest() {
-        perfJob?.cancel()
-        perfJob = viewModelScope.launch {
-            perfTest = PerfTestState(started = true)
-            try {
-                val started = withContext(Dispatchers.IO) { RootShell.perfTestStart() }
-                if (!started.success) {
-                    perfTest = PerfTestState(
-                        started = true,
-                        error = "No se pudo iniciar la prueba: ${started.output.takeLast(200)}"
-                    )
-                    return@launch
-                }
-                val deadline = SystemClock.elapsedRealtime() + PERF_TIMEOUT_MS
-                while (isActive) {
-                    delay(PERF_POLL_MS)
-                    val output = withContext(Dispatchers.IO) { RootShell.perfTestOutput() }
-                    val progress = PerfTestParser.parse(output)
-                    perfTest = PerfTestState(started = true, progress = progress)
-                    if (progress.verdict != null) return@launch
-                    if (SystemClock.elapsedRealtime() > deadline) {
-                        perfTest = PerfTestState(
-                            started = true,
-                            progress = progress,
-                            error = "La prueba tardó demasiado y se detuvo."
-                        )
-                        return@launch
-                    }
-                }
-            } finally {
-                withContext(NonCancellable + Dispatchers.IO) { RootShell.perfTestStop() }
-            }
-        }
-    }
-
-    fun cancelPerfTest() {
-        perfJob?.cancel()
-        perfJob = null
-        perfTest = PerfTestState()
-    }
-
     override fun onCleared() {
         authJob?.cancel()
-        perfJob?.cancel()
         super.onCleared()
     }
 
@@ -371,57 +291,6 @@ class BindViewModel : ViewModel() {
         }
     }
 
-    fun setPerfMode(mode: PerfMode) = viewModelScope.launch {
-        perfMode = mode
-        val result = withContext(Dispatchers.IO) {
-            val r = RootShell.setPerfMode(mode)
-            // v1.5.3: el tamaño de caché personalizado ahora solo se puede
-            // elegir en Máximo (el control ya no se muestra en Equilibrado).
-            // Al volver a Equilibrado se borra el ajuste guardado para que no
-            // quede un valor de una sesión anterior en Máximo aplicándose sin
-            // que se vea en ningún lado; setCacheGb(null) hace que se use el
-            // tamaño fijo del perfil (1G, ver defaultCacheGb).
-            if (mode == PerfMode.BALANCED) {
-                val cacheReset = RootShell.setCacheGb(null)
-                if (r.success) cacheReset else r
-            } else {
-                r
-            }
-        }
-        if (mode == PerfMode.BALANCED) cacheGb = null
-        message = when {
-            !result.success -> "Error al guardar: ${result.output.take(200)}"
-            isMounted -> "Guardado. Vuelve a montar para aplicarlo."
-            else -> null
-        }
-    }
-
-    /** [gb] null restablece el tamaño del perfil. */
-    fun setCacheGb(gb: Int?) = viewModelScope.launch {
-        cacheGb = gb
-        val result = withContext(Dispatchers.IO) { RootShell.setCacheGb(gb) }
-        message = when {
-            !result.success -> "Error al guardar: ${result.output.take(200)}"
-            isMounted -> "Guardado. Vuelve a montar para aplicarlo."
-            else -> null
-        }
-    }
-
-    /**
-     * Caché en RAM del perfil Máximo. La app solo guarda si el usuario la
-     * pidió; mount.sh comprueba la memoria libre y decide de verdad al
-     * montar (si no alcanza, sigue en disco y lo deja en Logs).
-     */
-    fun setRamCache(enabled: Boolean) = viewModelScope.launch {
-        ramCache = enabled
-        val result = withContext(Dispatchers.IO) { RootShell.setRamCache(enabled) }
-        message = when {
-            !result.success -> "Error al guardar: ${result.output.take(200)}"
-            isMounted -> "Guardado. Vuelve a montar para aplicarlo."
-            else -> null
-        }
-    }
-
     fun setAutostart(enabled: Boolean) = viewModelScope.launch {
         autostart = enabled
         withContext(Dispatchers.IO) { RootShell.setAutostart(enabled) }
@@ -438,31 +307,9 @@ class BindViewModel : ViewModel() {
         viewModelScope.launch { withContext(Dispatchers.IO) { RootShell.clearLog() } }
     }
 
-    /** Borra la caché en disco de rclone. Requiere tener el bind desmontado (ver clear_cache.sh). */
-    fun clearCache() = viewModelScope.launch {
-        if (isMounted) {
-            message = "Desmonta primero para borrar la caché"
-            return@launch
-        }
-        if (busy) return@launch
-        busy = true
-        val result = withContext(Dispatchers.IO) { RootShell.clearCache() }
-        busy = false
-        message = if (result.success) {
-            val kb = result.output.trim().removePrefix("OK").trim().toLongOrNull() ?: 0L
-            cacheKb = 0L
-            if (kb > 0) "Caché borrada (liberados ${formatCacheKb(kb)})" else "No había nada en caché"
-        } else {
-            "No se pudo borrar la caché: ${result.output.take(200)}"
-        }
-    }
-
     private companion object {
         const val AUTH_POLL_MS = 600L
         const val MIN_REFRESH_MS = 500L
-        const val PERF_POLL_MS = 500L
-        // La prueba entera tarda menos de 3 minutos aun con un enlace lento.
-        const val PERF_TIMEOUT_MS = 300_000L
         // El script corta a los 300 s; esto es solo la red de seguridad de la app.
         const val AUTH_TIMEOUT_MS = 330_000L
     }

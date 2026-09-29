@@ -30,8 +30,8 @@ android {
         applicationId = "com.rclonebind.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 29
-        versionName = "1.7.0"
+        versionCode = 16
+        versionName = "0.8.1"
 
         // Cliente OAuth de Google Drive que trae la app: el usuario solo da su
         // consentimiento, sin pegar credenciales. Se inyecta en el build desde
@@ -72,9 +72,6 @@ dependencies {
     // Compose 1.12 alpha, que exige compileSdk 37 y AGP 9.1.
     implementation("androidx.compose.material3:material3:1.5.0-alpha18")
     implementation("androidx.compose.material:material-icons-core")
-    // Variantes "outlined" de los íconos de la píldora inferior (estilo
-    // Material Expressive: trazo sin seleccionar, relleno al seleccionar).
-    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.9.0")
     // Desenfoque del fondo (backdrop blur) de la barra inferior tipo píldora
     implementation("dev.chrisbanes.haze:haze:1.6.10")
