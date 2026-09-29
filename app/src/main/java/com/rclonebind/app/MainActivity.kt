@@ -102,6 +102,7 @@ import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -144,6 +145,9 @@ private sealed class Screen(val label: String, val filledIcon: ImageVector, val 
 
 /** Alto de la píldora (52 + 2×8 de relleno) + separación por arriba y abajo. */
 private val PillSpace = 88.dp
+
+/** Cuánto tiempo se ve la etiqueta de la pestaña activa antes de esconderse (retrato). */
+private const val LabelHideDelayMs = 2000L
 
 /** Alto del degradado que funde el contenido con la barra del sistema. */
 private val FadeHeight = 104.dp
@@ -308,6 +312,19 @@ private fun FloatingPillNav(
     val currentOnSelect by rememberUpdatedState(onSelect)
     val currentVertical by rememberUpdatedState(vertical)
 
+    // La etiqueta de la pestaña activa se ve al cambiar de pestaña, al
+    // tocar la píldora y mientras el dedo siga puesto; pasado un momento se
+    // esconde y la píldora se encoge a solo iconos. Reaparece con la
+    // siguiente interacción.
+    var labelVisible by remember { mutableStateOf(true) }
+    LaunchedEffect(selected, pressed, vertical) {
+        labelVisible = true
+        if (!pressed) {
+            delay(LabelHideDelayMs)
+            labelVisible = false
+        }
+    }
+
     // ---- Geometría objetivo del indicador --------------------------------
     val target = bounds[selected]
     val drag = dragPos
@@ -463,6 +480,7 @@ private fun FloatingPillNav(
                             screen = screen,
                             selected = selected == index,
                             vertical = false,
+                            showLabel = labelVisible,
                             onClick = { onSelect(index) },
                             modifier = itemModifier(index)
                         )
@@ -479,7 +497,8 @@ private fun PillItem(
     selected: Boolean,
     vertical: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showLabel: Boolean = true
 ) {
     val colors = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
@@ -543,7 +562,7 @@ private fun PillItem(
             modifier = Modifier.size(28.dp).scale(iconScale)
         )
         AnimatedVisibility(
-            visible = selected,
+            visible = selected && showLabel,
             enter = fadeIn() + expandHorizontally(),
             exit = fadeOut() + shrinkHorizontally()
         ) {
