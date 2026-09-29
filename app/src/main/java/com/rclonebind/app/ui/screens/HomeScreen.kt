@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -21,7 +20,6 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -85,12 +83,7 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
         title = "Inicio",
         refreshing = vm.refreshing,
         onRefresh = { vm.pullRefresh() },
-        maxContentWidth = if (dualPane) DualPaneContentWidth else null,
-        actions = {
-            IconButton(onClick = { vm.refreshAll() }) {
-                Icon(Icons.Default.Refresh, contentDescription = "Actualizar")
-            }
-        }
+        maxContentWidth = if (dualPane) DualPaneContentWidth else null
     ) {
         Surface(
             color = heroColor,
