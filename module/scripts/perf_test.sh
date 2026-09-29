@@ -203,6 +203,9 @@ fi
 step space RUN "Midiendo el espacio libre"
 set -- $(df -k "$CACHE_DIR" 2>/dev/null | tail -n 1)
 FREE_KB="$4"
+# En RAM el tmpfs mide caché + reserva (mount.sh), así que "libre" siempre es
+# menor que eso una vez que se llena. Se compara el tamaño del tmpfs, no lo libre.
+[ "$CACHE_IS_RAM" = 1 ] && FREE_KB="$2"
 case "$FREE_KB" in
     ''|*[!0-9]*)
         step space WARN "No se pudo leer el espacio libre."
@@ -220,7 +223,11 @@ case "$FREE_KB" in
                 WHERE="en el almacenamiento"
                 [ "$CACHE_IS_RAM" = 1 ] && WHERE="en RAM"
                 if [ "$FREE_GB" -lt $(( NEED + RESERVE )) ]; then
-                    step space WARN "Solo quedan $FREE_GB GB libres $WHERE: no caben la caché de $NEED GB y la reserva de $RESERVE GB. rclone la irá recortando."
+                    if [ "$CACHE_IS_RAM" = 1 ]; then
+                        step space WARN "El tmpfs en RAM mide solo $FREE_GB GB: no caben la caché de $NEED GB y la reserva de $RESERVE GB. Desmonta y vuelve a montar para reajustarlo."
+                    else
+                        step space WARN "Solo quedan $FREE_GB GB libres $WHERE: no caben la caché de $NEED GB y la reserva de $RESERVE GB. rclone la irá recortando."
+                    fi
                 else
                     step space OK "$FREE_GB GB libres $WHERE, de sobra para una caché de $NEED GB."
                 fi
@@ -342,6 +349,17 @@ GROW_KB=$(( C1 - C0 ))
 GROW_MB=$(( GROW_KB / 1024 ))
 DETAIL="Primera vez $(fmt10 "$CX") MB/s, segunda $(fmt10 "$WX") MB/s, la caché en disco creció $GROW_MB MB."
 
+# Dos cosas que falsean la medición: una precarga todavía corriendo (compite
+# por el ancho de banda) y un remoto ya precargado (la primera lectura sale de
+# la caché y no mide la nube).
+PRE_WARN=0
+if [ -d "$MODDIR/preload.lock" ]; then
+    PRE_WARN=1
+    DETAIL="$DETAIL La precarga sigue corriendo y compite por la red: espera a que termine para medir."
+elif [ -f "$MODDIR/config/preload_done_$REMOTE" ]; then
+    DETAIL="$DETAIL El servidor está precargado: la primera lectura sale de la caché y no mide la velocidad real de la nube."
+fi
+
 # Último resultado del otro perfil con el mismo tipo de servidor, para poder
 # comparar Equilibrado contra Máximo probando una vez con cada uno.
 if [ "$PERF" = max ]; then OTHER=balanced; OL="Equilibrado"; else OTHER=max; OL="Máximo"; fi
@@ -355,7 +373,9 @@ echo "$CX $WX" > "$MODDIR/config/perf_last_${PERF:-balanced}_$RTYPE"
 
 case "$CACHE_MODE" in
     full)
-        if [ "$GROW_KB" -ge $(( TEST_MB * 512 )) ]; then
+        if [ "$PRE_WARN" = 1 ]; then
+            step read WARN "$DETAIL"
+        elif [ "$GROW_KB" -ge $(( TEST_MB * 512 )) ]; then
             step read OK "$DETAIL"
         elif [ "$CX" -ge 1000 ]; then
             step read OK "$DETAIL La primera lectura ya fue muy rápida: ese tramo probablemente ya estaba en caché."

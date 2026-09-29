@@ -21,8 +21,9 @@
 # el trabajo entre los workers no tenga condiciones de carrera.
 #
 # No repite trabajo ya hecho: si la caché sigue en disco (no en RAM, que se
-# pierde al desmontar) y el remoto tiene la misma cantidad de archivos y el
-# mismo tamaño total que la última precarga completa, se omite. clear_cache.sh
+# pierde al desmontar), conserva casi todo su tamaño y el remoto tiene la misma
+# cantidad de archivos y el mismo tamaño total que la última precarga
+# completa, se omite. clear_cache.sh
 # borra esta marca al vaciar la caché, así que un remonte tras limpiarla
 # vuelve a precargar todo.
 #
@@ -101,8 +102,11 @@ WORKERS="$(cat "$MODDIR/config/preload_workers" 2>/dev/null)"
 case "$WORKERS" in ''|*[!0-9]*|0) WORKERS=4 ;; esac
 [ "$WORKERS" -gt 8 ] && WORKERS=8
 
-LIMIT=""
-command -v timeout >/dev/null 2>&1 && LIMIT="timeout 300"
+# Tope de tiempo por archivo: 300 s como mínimo, y 4 s por MB para los
+# grandes (equivale a aguantar hasta ~0,25 MB/s). Un tope fijo cortaba a
+# medias los archivos grandes con enlace lento.
+HAVE_TIMEOUT=0
+command -v timeout >/dev/null 2>&1 && HAVE_TIMEOUT=1
 
 FILELIST="$MODDIR/.preload_list"
 find "$T" -type f -not -path '*/.rclone-bind-test/*' 2>/dev/null | sort > "$FILELIST"
@@ -114,7 +118,28 @@ TOTAL="$(wc -l < "$FILELIST" 2>/dev/null | tr -d ' ')"
 MARKER="$MODDIR/config/preload_done_$ACTIVE"
 FP_NOW="$TOTAL $(du -sk "$T" 2>/dev/null | awk '{print $1}')"
 
-if [ "$CACHE_IS_RAM" = 0 ] && [ -f "$MARKER" ] && [ "$(cat "$MARKER" 2>/dev/null)" = "$FP_NOW" ]; then
+# El marcador guarda "<archivos> <KB del remoto> <KB de cache/vfs>". Además de
+# que el remoto no haya cambiado, la caché en disco debe seguir ahí (al menos
+# el 90 % de lo que había al terminar): rclone la purga por antigüedad
+# (--vfs-cache-max-age) o por espacio, y sin esta comprobación se diría "ya
+# estaba precargado" con la caché vacía.
+CACHE_VFS="$MODDIR/cache/vfs"
+MARKER_OK=0
+if [ "$CACHE_IS_RAM" = 0 ] && [ -f "$MARKER" ]; then
+    set -- $(cat "$MARKER" 2>/dev/null)
+    if [ "$1 $2" = "$FP_NOW" ]; then
+        case "$3" in
+            ''|*[!0-9]*) ;;
+            *)
+                CUR_KB="$(du -sk "$CACHE_VFS" 2>/dev/null | awk '{print $1}')"
+                case "$CUR_KB" in ''|*[!0-9]*) CUR_KB=0 ;; esac
+                [ "$3" -gt 0 ] && [ "$CUR_KB" -ge $(( $3 * 9 / 10 )) ] && MARKER_OK=1
+                ;;
+        esac
+    fi
+fi
+
+if [ "$MARKER_OK" = 1 ]; then
     echo "$(date): Precarga: '$ACTIVE' ya estaba precargado por completo (sin cambios), se omite" >> "$LOG_FILE"
     N_SELECTED="$TOTAL"
     DONE_MB="$(( $(printf '%s' "$FP_NOW" | awk '{print $2}') / 1024 ))"
@@ -167,7 +192,9 @@ preload_worker() {
     while IFS= read -r f; do
         SZ_MB=$(( $(stat -c %s "$f" 2>/dev/null || echo 0) / 1048576 ))
         t0="$(date +%s)"
-        if $LIMIT cat "$f" > /dev/null 2>>"$LOG_FILE"; then
+        TL=$(( SZ_MB * 4 ))
+        [ "$TL" -lt 300 ] && TL=300
+        if { if [ "$HAVE_TIMEOUT" = 1 ]; then timeout "$TL" cat "$f"; else cat "$f"; fi; } > /dev/null 2>>"$LOG_FILE"; then
             ok=$(( ok + 1 ))
             echo "$(date): Precarga[$2]: ${f#$T/} (${SZ_MB} MB, $(( $(date +%s) - t0 ))s)" >> "$LOG_FILE"
             # Solo este worker escribe en su propio archivo: sin condiciones
@@ -203,13 +230,21 @@ preload_worker() {
 ) &
 MONITOR_PID=$!
 
+# Se guardan los PIDs de los workers: un "wait" sin argumentos esperaría
+# también al monitor de progreso, que solo termina cuando existe
+# .preload_all_done (que se crea después del wait) y el script se colgaría
+# para siempre. Si no hay ningún worker no se espera a nada.
+WPIDS=""
 w=0
 while [ "$w" -lt "$WORKERS" ]; do
     PART="$MODDIR/.preload_part_$w"
-    [ -s "$PART" ] && ( preload_worker "$PART" "$w" ) &
+    if [ -s "$PART" ]; then
+        ( preload_worker "$PART" "$w" ) &
+        WPIDS="$WPIDS $!"
+    fi
     w=$(( w + 1 ))
 done
-wait
+[ -n "$WPIDS" ] && wait $WPIDS
 touch "$MODDIR/.preload_all_done"
 wait "$MONITOR_PID" 2>/dev/null
 
@@ -237,5 +272,6 @@ echo "$(date): Precarga terminada: ${FINAL_MB} de ${DONE_MB} MB, $PN de $N_SELEC
 # cambió, no vuelve a bajar lo que ya está en disco.
 if [ "$CACHE_IS_RAM" = 0 ] && [ "$PN" = "$TOTAL" ] && [ "$TOTAL" -gt 0 ]; then
     mkdir -p "$MODDIR/config" 2>/dev/null
-    echo "$FP_NOW" > "$MARKER"
+    sync
+    echo "$FP_NOW $(du -sk "$CACHE_VFS" 2>/dev/null | awk '{print $1+0}')" > "$MARKER"
 fi

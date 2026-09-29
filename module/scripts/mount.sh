@@ -67,7 +67,10 @@ if [ "$PERF" = max ] && [ "$(cat "$MODDIR/config/ram_cache" 2>/dev/null)" = "1" 
     if [ "$AVAIL_MB" -ge "$NEED_MB" ]; then
         mkdir -p "$RAM_CACHE_DIR"
         if ! grep -q " $RAM_CACHE_DIR tmpfs" /proc/mounts; then
-            mount -t tmpfs -o "size=${CACHE_GB:-10}G,mode=0700" tmpfs "$RAM_CACHE_DIR" 2>>"$LOG_FILE"
+            # +2G sobre la caché: --vfs-cache-min-free-space 2G haría que rclone
+            # dejara 2G libres dentro del propio tmpfs y la caché útil quedara
+            # en N-2. Solo ocupa RAM lo que se escribe de verdad.
+            mount -t tmpfs -o "size=$(( ${CACHE_GB:-10} + 2 ))G,mode=0700" tmpfs "$RAM_CACHE_DIR" 2>>"$LOG_FILE"
         fi
         if grep -q " $RAM_CACHE_DIR tmpfs" /proc/mounts; then
             CACHE_DIR="$RAM_CACHE_DIR"
