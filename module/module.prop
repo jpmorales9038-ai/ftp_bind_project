@@ -1,7 +1,7 @@
 id=rclone_ftp_bind
 name=RClone FTP Bind
-version=v0.8.1
-versionCode=19
+version=v1.8
+versionCode=26
 author=you
 description=Monta un remoto (FTP o Google Drive) via rclone y lo expone como bind en el almacenamiento interno.
 updateJson=https://github.com/jpmorales9038-ai/ftp_bind_project/releases/latest/download/update.json

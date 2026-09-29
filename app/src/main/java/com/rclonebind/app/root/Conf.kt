@@ -6,6 +6,33 @@ enum class RemoteType(val rclone: String, val label: String) {
     DRIVE("drive", "Google Drive")
 }
 
+/** Perfil de rendimiento del montaje (lo lee scripts/mount.sh desde config/perf). */
+enum class PerfMode(val id: String, val label: String) {
+    BALANCED("balanced", "Equilibrado"),
+    MAX("max", "Máximo")
+}
+
+/**
+ * Rango del tamaño de caché en GB que ofrece la app. El tope real de lo que
+ * cabe en el teléfono no es este número: es el espacio libre real, que
+ * mount.sh siempre respeta dejando 2 GB de margen (--vfs-cache-min-free-space)
+ * y que "Probar rendimiento" avisa si no alcanza. 200 GB da lugar a juegos
+ * pesados completos sin obligar a bajar el perfil de rendimiento por un tope
+ * artificial de la app.
+ */
+const val CACHE_GB_MIN = 1
+const val CACHE_GB_MAX = 200
+
+/** Tamaño de caché que usa mount.sh cuando el usuario no eligió uno (debe coincidir con el script). */
+fun defaultCacheGb(mode: PerfMode): Int = if (mode == PerfMode.MAX) 10 else 1
+
+/** KB a un texto legible ("340 MB", "2.3 GB"), para mostrar el tamaño de la caché en disco. */
+fun formatCacheKb(kb: Long): String = when {
+    kb >= 1_048_576 -> "%.1f GB".format(kb / 1_048_576.0)
+    kb >= 1024 -> "%.0f MB".format(kb / 1024.0)
+    else -> "$kb KB"
+}
+
 /** Ajustes propios de un remoto Google Drive. El token nunca sale del rclone.conf. */
 data class DriveOptions(
     val clientId: String = "",
@@ -13,6 +40,8 @@ data class DriveOptions(
     val readOnly: Boolean = false,
     val rootFolderId: String = "",
     val teamDrive: String = "",
+    /** Equivale a --drive-acknowledge-abuse: permite bajar archivos que Google marca como malware/spam. */
+    val acknowledgeAbuse: Boolean = false,
     val hasToken: Boolean = false
 )
 
@@ -81,6 +110,7 @@ fun Conf.toProfiles(): List<RemoteProfile> =
                     readOnly = v["scope"] == DRIVE_SCOPE_READONLY,
                     rootFolderId = v["root_folder_id"].orEmpty(),
                     teamDrive = v["team_drive"].orEmpty(),
+                    acknowledgeAbuse = v["acknowledge_abuse"] == "true",
                     hasToken = !v["token"].isNullOrEmpty()
                 )
             )
@@ -106,6 +136,27 @@ fun cleanHost(raw: String): String =
         .removePrefix("https://")
         .substringBefore("/")
         .substringBefore(":")
+
+// Patrones de link para compartir una carpeta de Drive:
+//   https://drive.google.com/drive/folders/<id>?usp=sharing
+//   https://drive.google.com/drive/u/0/folders/<id>
+//   https://drive.google.com/open?id=<id>                 (link viejo, cualquier archivo/carpeta)
+private val DRIVE_FOLDER_URL = Regex("""/folders/([A-Za-z0-9_-]+)""")
+private val DRIVE_ID_PARAM = Regex("""[?&]id=([A-Za-z0-9_-]+)""")
+
+/**
+ * Es más fácil pegar el link para compartir la carpeta que buscar su ID a
+ * mano. Si [raw] matchea alguno de los links de arriba, devuelve solo el
+ * ID; si no matchea nada (ya es un ID, o cualquier otro texto), se
+ * devuelve tal cual recortado, para no interferir con lo que el usuario
+ * esté escribiendo.
+ */
+fun extractDriveFolderId(raw: String): String {
+    val trimmed = raw.trim()
+    DRIVE_FOLDER_URL.find(trimmed)?.let { return it.groupValues[1] }
+    DRIVE_ID_PARAM.find(trimmed)?.let { return it.groupValues[1] }
+    return trimmed
+}
 
 // Reglas de rclone para el nombre de un remoto: solo estos caracteres ASCII,
 // sin empezar con "-" ni con espacio.

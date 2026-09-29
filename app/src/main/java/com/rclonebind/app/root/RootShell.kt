@@ -14,10 +14,15 @@ object ModulePaths {
     const val RCLONE_CONF = "$CONFIG_DIR/rclone.conf"
     const val ACTIVE_FILE = "$CONFIG_DIR/active"
     const val TARGET_PATH_FILE = "$CONFIG_DIR/target_path"
+    const val PERF_FILE = "$CONFIG_DIR/perf"
+    const val CACHE_GB_FILE = "$CONFIG_DIR/cache_gb"
+    const val RAM_CACHE_FILE = "$CONFIG_DIR/ram_cache"
     const val STATUS_FILE = "$BASE/status.json"
     const val LOG_FILE = "$BASE/mount.log"
     /** Salida temporal de `rclone authorize` (contiene el token: se borra al terminar). */
     const val AUTH_OUT = "$BASE/auth.out"
+    /** Progreso de la prueba de rendimiento (lo escribe scripts/perf_test.sh). */
+    const val PERF_OUT = "$BASE/perf_test.out"
 }
 
 /**
@@ -35,6 +40,11 @@ object RootShell {
         val result = Shell.cmd(cmd).exec()
         return Result(result.isSuccess, result.out.joinToString("\n"))
     }
+
+    /** Primera línea de `rclone version` (ej. "rclone v1.68.0"), o null si no hay root / binario. */
+    fun rcloneVersion(): String? =
+        Shell.cmd("${ModulePaths.BIN} version 2>/dev/null | head -n 1").exec().out
+            .firstOrNull { it.isNotBlank() }?.trim()
 
     fun mount(): Result = run("sh ${ModulePaths.SCRIPTS}/mount.sh")
 
@@ -136,7 +146,7 @@ object RootShell {
     // Claves que la app administra en un remoto Drive; el resto de claves que
     // el usuario haya puesto a mano (impersonate, export_formats...) se conservan.
     private val DRIVE_MANAGED_KEYS =
-        setOf("type", "client_id", "client_secret", "scope", "token", "root_folder_id", "team_drive")
+        setOf("type", "client_id", "client_secret", "scope", "token", "root_folder_id", "team_drive", "acknowledge_abuse")
 
     /**
      * Crea o edita un remoto Google Drive. Con [token] null al editar se
@@ -161,6 +171,8 @@ object RootShell {
         section["token"] = finalToken
         if (options.rootFolderId.isNotEmpty()) section["root_folder_id"] = options.rootFolderId
         if (options.teamDrive.isNotEmpty()) section["team_drive"] = options.teamDrive
+        // Opción del backend drive: rclone la lee directo del rclone.conf, sin tocar mount.sh.
+        if (options.acknowledgeAbuse) section["acknowledge_abuse"] = "true"
         if (old != null) {
             for ((k, v) in old) {
                 if (k !in DRIVE_MANAGED_KEYS && !section.containsKey(k)) section[k] = v
@@ -212,12 +224,73 @@ object RootShell {
     fun setTargetPath(path: String): Result =
         run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(path)} > ${ModulePaths.TARGET_PATH_FILE}")
 
+    fun readPerfMode(): PerfMode {
+        val v = Shell.cmd("cat ${ModulePaths.PERF_FILE} 2>/dev/null").exec().out.joinToString("").trim()
+        return PerfMode.entries.firstOrNull { it.id == v } ?: PerfMode.BALANCED
+    }
+
+    fun setPerfMode(mode: PerfMode): Result =
+        run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(mode.id)} > ${ModulePaths.PERF_FILE}")
+
+    /** Tamaño de caché elegido (GB), o null si se usa el del perfil. */
+    fun readCacheGb(): Int? =
+        Shell.cmd("cat ${ModulePaths.CACHE_GB_FILE} 2>/dev/null").exec().out
+            .joinToString("").trim().toIntOrNull()?.takeIf { it in CACHE_GB_MIN..CACHE_GB_MAX }
+
+    /** Con [gb] null se borra el ajuste y vuelve al tamaño del perfil. */
+    fun setCacheGb(gb: Int?): Result =
+        if (gb == null) run("rm -f ${ModulePaths.CACHE_GB_FILE}")
+        else run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' $gb > ${ModulePaths.CACHE_GB_FILE}")
+
+    /**
+     * Caché en RAM del perfil Máximo. Guarda solo lo que el usuario pidió:
+     * mount.sh decide con root, al montar, si hay memoria libre para
+     * cumplirlo (si no, sigue en disco y lo anota en Logs).
+     */
+    fun readRamCache(): Boolean =
+        Shell.cmd("cat ${ModulePaths.RAM_CACHE_FILE} 2>/dev/null").exec().out.joinToString("").trim() == "1"
+
+    fun setRamCache(enabled: Boolean): Result =
+        if (enabled) run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '1' > ${ModulePaths.RAM_CACHE_FILE}")
+        else run("rm -f ${ModulePaths.RAM_CACHE_FILE}")
+
+    // ---- Prueba de rendimiento ----
+
+    /**
+     * Lanza scripts/perf_test.sh en segundo plano. Vuelve enseguida; el
+     * progreso se lee con [perfTestOutput]. Borra la salida anterior primero
+     * para no leer los resultados de una prueba vieja.
+     */
+    fun perfTestStart(): Result =
+        run("rm -f ${ModulePaths.PERF_OUT}; nohup sh ${ModulePaths.SCRIPTS}/perf_test.sh >/dev/null 2>&1 &")
+
+    fun perfTestOutput(): String =
+        Shell.cmd("cat ${ModulePaths.PERF_OUT} 2>/dev/null").exec().out.joinToString("\n")
+
+    /** Corta la prueba si sigue viva (el script borra su archivo temporal al recibir la señal). */
+    fun perfTestStop(): Result =
+        run("pkill -f perf_test.sh; rm -f ${ModulePaths.PERF_OUT}")
+
     fun readAutostart(): Boolean =
         Shell.cmd("cat ${ModulePaths.CONFIG_DIR}/autostart 2>/dev/null").exec().out
             .joinToString("").trim() == "1"
 
     fun setAutostart(enabled: Boolean): Result =
         run("mkdir -p ${ModulePaths.CONFIG_DIR} && echo '${if (enabled) "1" else "0"}' > ${ModulePaths.CONFIG_DIR}/autostart")
+
+    // ---- Caché en disco de rclone ----
+
+    /** Tamaño actual de la caché en KB, para mostrarlo en la UI. */
+    fun cacheSizeKb(): Long =
+        Shell.cmd("du -sk ${ModulePaths.BASE}/cache 2>/dev/null | cut -f1").exec().out
+            .firstOrNull()?.trim()?.toLongOrNull() ?: 0L
+
+    /**
+     * Borra la caché en disco (scripts/clear_cache.sh). Solo tiene efecto
+     * con el bind desmontado: si sigue montado, el script se niega para no
+     * perder escrituras pendientes y Result.output empieza con "ERROR".
+     */
+    fun clearCache(): Result = run("sh ${ModulePaths.SCRIPTS}/clear_cache.sh")
 
     /** Subcarpetas (sin ocultas) de [path], ordenadas. Se lista con root para no depender de permisos de almacenamiento. */
     fun listDirs(path: String): List<String> =

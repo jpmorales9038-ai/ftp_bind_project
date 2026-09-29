@@ -21,7 +21,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -32,16 +34,37 @@ import androidx.compose.ui.unit.dp
 val LocalContentBottomInset = compositionLocalOf { 0.dp }
 
 /**
- * Espacio a la derecha que ocupa la píldora en modo apaisado (ahí es vertical
- * y va pegada a ese borde). Mismo propósito que [LocalContentBottomInset]
- * pero para cuando la barra se traslada a un lado en vez de abajo.
+ * Igual que [LocalContentBottomInset] pero para el borde derecho: en modo
+ * apaisado la píldora se muda ahí, así que el contenido reserva ese espacio
+ * en vez del inferior.
  */
 val LocalContentEndInset = compositionLocalOf { 0.dp }
 
 /**
+ * A partir de este ancho de pantalla hay espacio real para dos columnas
+ * (apaisado en casi cualquier celular, o una tablet en cualquier
+ * orientación); por debajo, una sola columna apilada. Lo usan Servidores
+ * (paneles de FTP y Google Drive) e Inicio (montaje y ajustes).
+ */
+const val DualPaneMinWidthDp = 700
+
+/** true si el ancho actual de pantalla alcanza para un doble panel. */
+@Composable
+fun rememberIsDualPane(): Boolean = LocalConfiguration.current.screenWidthDp >= DualPaneMinWidthDp
+
+/** Ancho del contenido cuando una pantalla arma doble panel: más que el máximo normal (640–780dp), porque son dos columnas. */
+val DualPaneContentWidth = 1080.dp
+
+/**
  * Pantalla con encabezado fijo grande (título + acciones a la derecha) y
  * contenido desplazable debajo. El contenido se corta en seco contra el
- * encabezado. Ancho máximo para que en tablets no se estire.
+ * encabezado.
+ *
+ * El ancho del contenido se centra y tiene un máximo para que en pantallas
+ * angostas (celular en vertical) no cambie nada, pero en pantallas anchas
+ * (apaisado, tablets) crezca en vez de dejar franjas vacías a los costados.
+ * [maxContentWidth] fuerza un ancho puntual (lo usa Servidores para su doble
+ * panel); dejarlo en null usa el cálculo automático.
  *
  * Con [onRefresh] el contenido admite "deslizar hacia abajo para actualizar";
  * [refreshing] indica si hay una actualización en curso (muestra el indicador).
@@ -55,11 +78,14 @@ fun ScreenContainer(
     scroll: Boolean = true,
     refreshing: Boolean = false,
     onRefresh: (() -> Unit)? = null,
+    maxContentWidth: Dp? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val scrollState = rememberScrollState()
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val resolvedMaxWidth = maxContentWidth ?: adaptiveMaxWidth(screenWidthDp)
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.widthIn(max = 640.dp).fillMaxSize()) {
+        Column(Modifier.widthIn(max = resolvedMaxWidth).fillMaxSize()) {
             if (title != null) ScreenHeader(title, actions)
             if (onRefresh != null) {
                 PullToRefreshBox(
@@ -96,6 +122,18 @@ private fun ScreenBody(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         content = content
     )
+}
+
+/**
+ * 640dp de siempre para celular en vertical (85% de un ancho típico de
+ * ~380–430dp da menos que eso, así que el mínimo de la función gana y no
+ * cambia nada). Desde ahí crece con la pantalla hasta 780dp: suficiente
+ * para aprovechar el apaisado sin alargar tanto las líneas de texto como
+ * para que cueste leerlas.
+ */
+private fun adaptiveMaxWidth(screenWidthDp: Int): Dp {
+    val adaptive = screenWidthDp * 0.85f
+    return adaptive.dp.coerceIn(640.dp, 780.dp)
 }
 
 @Composable
