@@ -8,6 +8,27 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.snap
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.unit.toSize
+import kotlin.math.max
+import kotlin.math.min
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -252,6 +273,12 @@ private fun AppScaffold(vm: BindViewModel) {
  * primary, contenido onPrimary / onPrimaryContainer. En retrato es
  * horizontal y la pestaña activa muestra icono + etiqueta; en apaisado
  * ([vertical]) se apila a la derecha y va solo con iconos, sin etiquetas.
+ *
+ * Hay UN solo indicador (dibujado detrás de los ítems) que se desliza
+ * entre pestañas con un spring. Al poner el dedo sobre la píldora el
+ * indicador se "infla" y, si arrastras, sigue al dedo; la pestaña bajo el
+ * dedo se selecciona sobre la marcha (con háptico y cambio de página).
+ * Al soltar se desinfla y se asienta en la pestaña elegida.
  */
 @Composable
 private fun FloatingPillNav(
@@ -263,6 +290,89 @@ private fun FloatingPillNav(
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
+    val haptics = LocalHapticFeedback.current
+
+    // Rectángulo de cada ítem en las coordenadas de la Row/Column que los
+    // contiene (el mismo sistema en el que dibuja el indicador).
+    val bounds = remember(items.size) {
+        mutableStateListOf<Rect>().apply { repeat(items.size) { add(Rect.Zero) } }
+    }
+    var pressed by remember { mutableStateOf(false) }
+    // Posición del dedo sobre el eje de la barra (null = no hay arrastre).
+    var dragPos by remember { mutableStateOf<Float?>(null) }
+
+    // targetPage cambia en cuanto se pide el salto (currentPage espera a
+    // cruzar la mitad), así la barra reacciona al instante.
+    val selected = pagerState.targetPage.coerceIn(0, items.lastIndex)
+    val currentSelected by rememberUpdatedState(selected)
+    val currentOnSelect by rememberUpdatedState(onSelect)
+    val currentVertical by rememberUpdatedState(vertical)
+
+    // ---- Geometría objetivo del indicador --------------------------------
+    val target = bounds[selected]
+    val drag = dragPos
+    var tx = target.left
+    var ty = target.top
+    if (drag != null && !target.isEmpty) {
+        val real = bounds.filter { !it.isEmpty }
+        if (currentVertical) {
+            val lo = real.minOf { it.top }
+            val hi = real.maxOf { it.bottom }
+            ty = (drag - target.height / 2f).coerceIn(lo, max(lo, hi - target.height))
+        } else {
+            val lo = real.minOf { it.left }
+            val hi = real.maxOf { it.right }
+            tx = (drag - target.width / 2f).coerceIn(lo, max(lo, hi - target.width))
+        }
+    }
+
+    // La primera vez que hay medidas el indicador aparece directo en su
+    // sitio (snap) en vez de viajar desde (0,0).
+    var placed by remember { mutableStateOf(false) }
+    SideEffect { if (!target.isEmpty) placed = true }
+
+    // Mientras arrastras la posición sigue al dedo casi sin retraso; al
+    // soltar (o al tocar) asienta con rebote. El tamaño usa otro spring más
+    // rápido: la diferencia de velocidades da un pequeño efecto "elástico".
+    val posSpec: FiniteAnimationSpec<Float> = when {
+        !placed -> snap()
+        drag != null -> spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh)
+        else -> spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow)
+    }
+    val sizeSpec: FiniteAnimationSpec<Float> =
+        if (!placed) snap() else spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMedium)
+
+    val ix by animateFloatAsState(tx, posSpec, label = "pillIndX")
+    val iy by animateFloatAsState(ty, posSpec, label = "pillIndY")
+    val iw by animateFloatAsState(target.width, sizeSpec, label = "pillIndW")
+    val ih by animateFloatAsState(target.height, sizeSpec, label = "pillIndH")
+
+    // El "inflado": crece con el dedo puesto y vuelve con rebote al soltar.
+    val inflate by animateFloatAsState(
+        if (pressed) 1.18f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "pillInflate"
+    )
+
+    val indicatorColor = colors.primary
+    val drawIndicator = Modifier.drawBehind {
+        if (iw > 0f && ih > 0f) {
+            withTransform({ scale(inflate, inflate, pivot = Offset(ix + iw / 2f, iy + ih / 2f)) }) {
+                drawRoundRect(
+                    color = indicatorColor,
+                    topLeft = Offset(ix, iy),
+                    size = Size(iw, ih),
+                    cornerRadius = CornerRadius(min(iw, ih) / 2f)
+                )
+            }
+        }
+    }
+
+    fun itemModifier(index: Int) = Modifier.onGloballyPositioned {
+        val r = Rect(it.positionInParent(), it.size.toSize())
+        if (bounds[index] != r) bounds[index] = r
+    }
+
     // Vidrio esmerilado: desenfoca lo que pasa por debajo y lo tiñe con
     // primaryContainer semitransparente (sigue el color dinámico). Sin
     // Android 12+ Haze cae a un tinte plano.
@@ -279,34 +389,84 @@ private fun FloatingPillNav(
         color = Color.Transparent,
         border = BorderStroke(1.dp, colors.onPrimaryContainer.copy(alpha = 0.12f))
     ) {
-        if (vertical) {
-            Column(
-                modifier = Modifier.padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                items.forEachIndexed { index, screen ->
-                    PillItem(
-                        screen = screen,
-                        selected = pagerState.currentPage == index,
-                        vertical = true,
-                        onClick = { onSelect(index) }
-                    )
+        // Capa de gestos sobre toda la píldora. No consume nada hasta pasar
+        // el umbral de arrastre, así un toque simple sigue llegando al
+        // selectable de cada ítem; al empezar a arrastrar consume y cancela
+        // ese clic.
+        Box(
+            Modifier.pointerInput(Unit) {
+                val padPx = 8.dp.toPx()
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    pressed = true
+                    var dragging = false
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            if (!dragging && (change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                                dragging = true
+                            }
+                            if (dragging) {
+                                change.consume()
+                                val c = (if (currentVertical) change.position.y else change.position.x) - padPx
+                                dragPos = c
+                                // Ítem bajo el dedo (o el más cercano si cae en un hueco).
+                                var best = currentSelected
+                                var bestDist = Float.MAX_VALUE
+                                bounds.forEachIndexed { i, r ->
+                                    if (!r.isEmpty) {
+                                        val start = if (currentVertical) r.top else r.left
+                                        val end = if (currentVertical) r.bottom else r.right
+                                        val d = max(max(start - c, c - end), 0f)
+                                        if (d < bestDist) { bestDist = d; best = i }
+                                    }
+                                }
+                                if (best != currentSelected) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                    currentOnSelect(best)
+                                }
+                            }
+                        }
+                    } finally {
+                        pressed = false
+                        dragPos = null
+                    }
                 }
             }
-        } else {
-            Row(
-                modifier = Modifier.padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                items.forEachIndexed { index, screen ->
-                    PillItem(
-                        screen = screen,
-                        selected = pagerState.currentPage == index,
-                        vertical = false,
-                        onClick = { onSelect(index) }
-                    )
+        ) {
+            if (vertical) {
+                Column(
+                    modifier = Modifier.padding(8.dp).then(drawIndicator),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    items.forEachIndexed { index, screen ->
+                        PillItem(
+                            screen = screen,
+                            selected = selected == index,
+                            vertical = true,
+                            onClick = { onSelect(index) },
+                            modifier = itemModifier(index)
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.padding(8.dp).then(drawIndicator),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items.forEachIndexed { index, screen ->
+                        PillItem(
+                            screen = screen,
+                            selected = selected == index,
+                            vertical = false,
+                            onClick = { onSelect(index) },
+                            modifier = itemModifier(index)
+                        )
+                    }
                 }
             }
         }
@@ -314,12 +474,17 @@ private fun FloatingPillNav(
 }
 
 @Composable
-private fun PillItem(screen: Screen, selected: Boolean, vertical: Boolean, onClick: () -> Unit) {
+private fun PillItem(
+    screen: Screen,
+    selected: Boolean,
+    vertical: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val colors = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
-    val indicator by animateColorAsState(
-        if (selected) colors.primary else Color.Transparent, label = "pillIndicator"
-    )
+    // El fondo de la pestaña activa ya no lo pinta cada ítem: lo dibuja el
+    // indicador único de FloatingPillNav, que se desliza entre pestañas.
     val content by animateColorAsState(
         if (selected) colors.onPrimary else colors.onPrimaryContainer, label = "pillContent"
     )
@@ -331,10 +496,9 @@ private fun PillItem(screen: Screen, selected: Boolean, vertical: Boolean, onCli
         label = "pillIconScale"
     )
 
-    val itemModifier = Modifier
+    val itemModifier = modifier
         .let { if (vertical) it.size(52.dp) else it.height(52.dp).defaultMinSize(minWidth = 52.dp) }
         .clip(CircleShape)
-        .background(indicator)
         .selectable(
             selected = selected,
             role = Role.Tab,
