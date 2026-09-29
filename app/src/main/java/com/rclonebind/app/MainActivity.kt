@@ -216,12 +216,13 @@ private fun AppScaffold(vm: BindViewModel) {
                 }
             }
 
-            // Difuminado inferior: desde la barra de navegación del sistema hacia
-            // arriba el contenido se funde con el fondo. Va sobre el pager y bajo
-            // la píldora; no intercepta toques. Solo tiene sentido pegado abajo,
-            // que es donde vive la píldora en retrato; en apaisado (píldora a la
-            // derecha) no hay nada que fundir ahí y se quita.
-            if (!isLandscape) {
+            // Difuminado inferior: desde la barra de gestos del sistema hacia
+            // arriba el contenido se funde con el fondo. Va sobre el pager y
+            // bajo la píldora; no intercepta toques. La barra de gestos vive
+            // pegada abajo en las dos orientaciones (a diferencia de la
+            // píldora, que en apaisado se corre al lateral derecho), así que
+            // este difuminado no depende de isLandscape.
+            run {
                 val fade = MaterialTheme.colorScheme.background
                 Box(
                     Modifier
