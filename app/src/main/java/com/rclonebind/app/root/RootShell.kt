@@ -61,11 +61,17 @@ object RootShell {
      * Corta cualquier corrida anterior primero (igual que hace mount.sh al
      * montar), así sirve tanto para reintentar un fallo como para volver a
      * comprobar el remoto tras agregar archivos nuevos.
+     *
+     * Va con "force": ignora la marca de "ya estaba precargado" (que
+     * mount.sh sí respeta al montar solo, para no gastar red de más en cada
+     * montaje) porque acá el usuario tocó el botón a propósito. No vuelve a
+     * bajar de la red lo que ya está en caché sin cambios: rclone lo sirve
+     * desde disco.
      */
     fun preloadStart(): Result = run(
         "pkill -f ${ModulePaths.SCRIPTS}/preload.sh 2>/dev/null; " +
             "rm -rf ${ModulePaths.BASE}/preload.lock; " +
-            "nohup sh ${ModulePaths.SCRIPTS}/preload.sh >/dev/null 2>&1 &"
+            "nohup sh ${ModulePaths.SCRIPTS}/preload.sh force >/dev/null 2>&1 &"
     )
 
     fun preloadStatus(): String =

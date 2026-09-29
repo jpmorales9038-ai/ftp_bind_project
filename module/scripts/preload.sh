@@ -33,8 +33,16 @@
 # Si el remoto tiene más contenido que solo los assets, conviene usar la
 # opción "carpeta raíz" del servidor Drive para acotar lo que ve la app (y
 # por lo tanto lo que esto precarga).
+#
+# $1 = "force" (opcional): ignora la marca de "ya estaba precargado" y
+# vuelve a pasar por todos los archivos seleccionados. La llama así el botón
+# "Precargar ahora" de la app; mount.sh la sigue lanzando SIN este argumento
+# al montar, para no gastar red de más en cada montaje si no cambió nada. Un
+# archivo ya en caché y sin cambios lo sirve rclone desde disco (casi
+# instantáneo), así que forzar no vuelve a bajar de la red lo que ya estaba.
 SELF="$(readlink -f "$0")"
 MODDIR=$(dirname "$(dirname "$SELF")")
+FORCE="$1"
 
 if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
     exec nsenter -t 1 -m -- sh "$SELF" "$@"
@@ -132,7 +140,7 @@ FP_NOW="$TOTAL $(du -sk "$T" 2>/dev/null | awk '{print $1}')"
 # estaba precargado" con la caché vacía.
 CACHE_VFS="$MODDIR/cache/vfs"
 MARKER_OK=0
-if [ "$CACHE_IS_RAM" = 0 ] && [ -f "$MARKER" ]; then
+if [ "$FORCE" != "force" ] && [ "$CACHE_IS_RAM" = 0 ] && [ -f "$MARKER" ]; then
     set -- $(cat "$MARKER" 2>/dev/null)
     if [ "$1 $2" = "$FP_NOW" ]; then
         case "$3" in
