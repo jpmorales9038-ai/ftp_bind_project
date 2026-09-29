@@ -25,23 +25,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RemoteType
+import com.rclonebind.app.ui.components.DualPaneContentWidth
 import com.rclonebind.app.ui.components.ScreenContainer
 import com.rclonebind.app.ui.components.ServerCardStack
 import com.rclonebind.app.ui.components.ServerSheet
-
-// A partir de este ancho de pantalla (apaisado en casi cualquier celular,
-// o una tablet en cualquier orientación) entran cómodos dos paneles de
-// ~330dp con separación; por debajo se apila como antes en un solo stack.
-private const val DualPaneMinWidthDp = 700
-
-// Ancho del contenido cuando hay dos paneles: bastante más que el máximo
-// normal de ScreenContainer (640–780dp), porque aquí son dos columnas.
-private val DualPaneContentWidth = 1080.dp
+import com.rclonebind.app.ui.components.rememberIsDualPane
 
 @Composable
 fun ServersScreen(vm: BindViewModel) {
@@ -58,7 +50,7 @@ fun ServersScreen(vm: BindViewModel) {
         showSheet = true
     }
 
-    val dualPane = LocalConfiguration.current.screenWidthDp >= DualPaneMinWidthDp
+    val dualPane = rememberIsDualPane()
 
     Box(Modifier.fillMaxSize()) {
         ScreenContainer(

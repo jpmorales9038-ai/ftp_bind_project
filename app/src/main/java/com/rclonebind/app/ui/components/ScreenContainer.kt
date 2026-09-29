@@ -34,6 +34,21 @@ import androidx.compose.ui.unit.dp
 val LocalContentBottomInset = compositionLocalOf { 0.dp }
 
 /**
+ * A partir de este ancho de pantalla hay espacio real para dos columnas
+ * (apaisado en casi cualquier celular, o una tablet en cualquier
+ * orientación); por debajo, una sola columna apilada. Lo usan Servidores
+ * (paneles de FTP y Google Drive) e Inicio (montaje y ajustes).
+ */
+const val DualPaneMinWidthDp = 700
+
+/** true si el ancho actual de pantalla alcanza para un doble panel. */
+@Composable
+fun rememberIsDualPane(): Boolean = LocalConfiguration.current.screenWidthDp >= DualPaneMinWidthDp
+
+/** Ancho del contenido cuando una pantalla arma doble panel: más que el máximo normal (640–780dp), porque son dos columnas. */
+val DualPaneContentWidth = 1080.dp
+
+/**
  * Pantalla con encabezado fijo grande (título + acciones a la derecha) y
  * contenido desplazable debajo. El contenido se corta en seco contra el
  * encabezado.

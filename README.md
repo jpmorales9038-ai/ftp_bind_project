@@ -116,6 +116,7 @@ sequenceDiagram
 - Modo **claro y oscuro** según el sistema, a pantalla completa.
 - Esquinas amplias, animaciones con resorte y efecto de desenfoque.
 - Ancho del contenido adaptable: crece en pantallas anchas en vez de dejar franjas vacías a los costados.
+- Inicio también arma **doble panel** en pantalla ancha: montaje (servidor, carpeta, botón) a la izquierda, ajustes (autostart y rendimiento) a la derecha.
 - Icono adaptable con versión monocromática para el tema de íconos.
 - Pantallas de **Inicio**, **Servidores**, **Logs** y **Acerca de**, con la versión de la app y de rclone.
 
