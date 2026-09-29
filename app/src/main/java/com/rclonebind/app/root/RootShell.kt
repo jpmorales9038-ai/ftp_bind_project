@@ -62,6 +62,12 @@ object RootShell {
      * montar), así sirve tanto para reintentar un fallo como para volver a
      * comprobar el remoto tras agregar archivos nuevos.
      *
+     * Espera hasta 5s (en segundo plano, sin bloquear esta llamada) a que
+     * esa corrida anterior suelte su candado de verdad antes de borrarlo y
+     * lanzar la nueva: borrarlo sin esperar podía dejar la precarga nueva
+     * pisando archivos temporales a medio limpiar de la vieja y terminando
+     * con 0 archivos seleccionados (ver el mismo ajuste en mount.sh).
+     *
      * Va con "force": ignora la marca de "ya estaba precargado" (que
      * mount.sh sí respeta al montar solo, para no gastar red de más en cada
      * montaje) porque acá el usuario tocó el botón a propósito. No vuelve a
@@ -70,8 +76,9 @@ object RootShell {
      */
     fun preloadStart(): Result = run(
         "pkill -f ${ModulePaths.SCRIPTS}/preload.sh 2>/dev/null; " +
+            "( i=0; while [ -d ${ModulePaths.BASE}/preload.lock ] && [ \"\$i\" -lt 5 ]; do sleep 1; i=\$((i + 1)); done; " +
             "rm -rf ${ModulePaths.BASE}/preload.lock; " +
-            "nohup sh ${ModulePaths.SCRIPTS}/preload.sh force >/dev/null 2>&1 &"
+            "nohup sh ${ModulePaths.SCRIPTS}/preload.sh force >/dev/null 2>&1 ) &"
     )
 
     fun preloadStatus(): String =

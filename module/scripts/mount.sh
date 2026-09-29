@@ -145,9 +145,27 @@ do_bind() {
     # perfil activo no cachea lecturas completas). Se corta cualquier
     # precarga anterior antes de lanzar esta, para no acumular procesos en
     # remontajes seguidos.
+    #
+    # pkill solo ENVÍA la señal, no espera a que el proceso viejo termine de
+    # verdad. Si acá se borraba el candado sin esperar, y ese proceso viejo
+    # todavía estaba a medio limpiar sus archivos temporales (.preload_list,
+    # .preload_part_*...), la precarga nueva arrancaba sobre esos mismos
+    # archivos a medio escribir/borrar y terminaba viendo 0 archivos para
+    # precargar en vez de los que había (visto en mount.log: dos líneas
+    # "Precarga: ..." con un total distinto en el mismo segundo). Se espera
+    # hasta 5s a que el propio trap de salida de preload.sh suelte el
+    # candado antes de forzar el borrado y lanzar la nueva; todo en segundo
+    # plano para no demorar la confirmación de montaje.
     pkill -f "$MODDIR/scripts/preload.sh" 2>/dev/null
-    rm -rf "$MODDIR/preload.lock"
-    ( sh "$MODDIR/scripts/preload.sh" </dev/null >/dev/null 2>&1 & )
+    (
+        i=0
+        while [ -d "$MODDIR/preload.lock" ] && [ "$i" -lt 5 ]; do
+            sleep 1
+            i=$((i + 1))
+        done
+        rm -rf "$MODDIR/preload.lock"
+        sh "$MODDIR/scripts/preload.sh" </dev/null >/dev/null 2>&1
+    ) &
 
     exit 0
 }
