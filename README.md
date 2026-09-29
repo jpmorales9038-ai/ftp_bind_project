@@ -66,6 +66,7 @@ sequenceDiagram
 - Cada servidor es una tarjeta; la seleccionada se abre y las demás asoman su franja.
 - Tocar una tarjeta elige cuál se monta. Agregar, editar y eliminar desde la misma pantalla.
 - Compatible con **FTP** y **Google Drive**.
+- En pantalla ancha (apaisado, tablets) se ven **dos paneles uno al lado del otro**, uno por tipo de remoto, cada uno con su propio botón de agregar; en vertical siguen mezclados en una sola pila, como siempre.
 - Las contraseñas se guardan ofuscadas con `rclone obscure`.
 - Al editar, dejar la contraseña vacía conserva la anterior.
 
@@ -114,6 +115,7 @@ sequenceDiagram
 - Material 3 con **color dinámico** (Material You) en Android 12 o superior.
 - Modo **claro y oscuro** según el sistema, a pantalla completa.
 - Esquinas amplias, animaciones con resorte y efecto de desenfoque.
+- Ancho del contenido adaptable: crece en pantallas anchas en vez de dejar franjas vacías a los costados.
 - Icono adaptable con versión monocromática para el tema de íconos.
 - Pantallas de **Inicio**, **Servidores**, **Logs** y **Acerca de**, con la versión de la app y de rclone.
 

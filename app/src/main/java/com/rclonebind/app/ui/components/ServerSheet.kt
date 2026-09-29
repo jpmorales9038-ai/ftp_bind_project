@@ -68,6 +68,10 @@ import kotlinx.coroutines.launch
 @Composable
 fun ServerSheet(
     initial: RemoteProfile?,
+    // Solo aplica cuando initial es null (servidor nuevo): qué chip queda
+    // marcado al abrir. Por ejemplo, el panel de Google Drive en el doble
+    // panel de Servidores abre el formulario ya en Drive en vez de FTP.
+    initialType: RemoteType = RemoteType.FTP,
     existingNames: List<String>,
     driveAuth: DriveAuthState,
     onDriveLogin: (clientId: String, clientSecret: String) -> Unit,
@@ -86,7 +90,7 @@ fun ServerSheet(
     var hostError by remember { mutableStateOf<String?>(null) }
     var portError by remember { mutableStateOf<String?>(null) }
 
-    var type by remember { mutableStateOf(initial?.type ?: RemoteType.FTP) }
+    var type by remember { mutableStateOf(initial?.type ?: initialType) }
 
     // Estado de Google Drive
     val initialDrive = initial?.drive
