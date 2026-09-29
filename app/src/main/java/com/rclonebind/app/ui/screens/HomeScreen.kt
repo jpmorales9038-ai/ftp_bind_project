@@ -494,9 +494,8 @@ private fun PerfCard(
  * muestra en perfil Máximo (es el único que cachea lecturas completas de
  * FTP; Drive las cachea en cualquier perfil, pero el botón manual solo
  * tiene sentido junto al resto de los controles de rendimiento). El
- * objetivo: que cuando la barra llegue a 100%, abrir el juego en Winlator o
- * GameHub lea los assets ya cacheados en el propio teléfono, sin esperar a
- * la red.
+ * objetivo: que al llegar la barra a 100%, lo que ya se precargó se lea
+ * desde el teléfono, sin esperar a la red.
  */
 @Composable
 private fun PreloadCard(vm: BindViewModel, mounted: Boolean) {
@@ -505,10 +504,10 @@ private fun PreloadCard(vm: BindViewModel, mounted: Boolean) {
     val hasData = status != null && status.selectedFiles > 0
 
     SectionCard(
-        title = "Precarga para juegos",
+        title = "Precarga de archivos",
         icon = AppIcons.Download,
-        subtitle = "Baja los assets del remoto a la caché local antes de abrir el juego. Ya " +
-            "precargados, Winlator y GameHub los leen del teléfono, casi como almacenamiento local."
+        subtitle = "Baja los archivos del remoto a la caché local del teléfono antes de que se " +
+            "necesiten. Ya precargados, se leen desde ahí en vez de esperar la descarga en el momento."
     ) {
         if (!hasData) {
             Text(

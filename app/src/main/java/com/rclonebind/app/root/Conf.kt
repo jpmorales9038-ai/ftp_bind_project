@@ -16,12 +16,11 @@ enum class PerfMode(val id: String, val label: String) {
  * Rango del tamaño de caché en GB que ofrece la app. El tope real de lo que
  * cabe en el teléfono no es este número: es el espacio libre real, que
  * mount.sh siempre respeta dejando 2 GB de margen (--vfs-cache-min-free-space)
- * y que "Probar rendimiento" avisa si no alcanza. 200 GB da lugar a juegos
- * pesados completos sin obligar a bajar el perfil de rendimiento por un tope
- * artificial de la app.
+ * y que "Probar rendimiento" avisa si no alcanza. 100 GB es el tope que
+ * ofrece el slider.
  */
 const val CACHE_GB_MIN = 1
-const val CACHE_GB_MAX = 200
+const val CACHE_GB_MAX = 100
 
 /** Tamaño de caché que usa mount.sh cuando el usuario no eligió uno (debe coincidir con el script). */
 fun defaultCacheGb(mode: PerfMode): Int = if (mode == PerfMode.MAX) 10 else 1
