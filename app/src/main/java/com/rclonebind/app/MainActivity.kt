@@ -25,20 +25,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.outlined.List
-import androidx.compose.material.icons.filled.AccountBox
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.outlined.AccountBox
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.rounded.AccountBox
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -102,13 +103,15 @@ class MainActivity : ComponentActivity() {
  * Cada pestaña trae un ícono en trazo (sin seleccionar) y uno relleno
  * (seleccionada) — el intercambio outlined/filled es el lenguaje que
  * Material Expressive usa en sus barras de navegación en vez de solo
- * cambiar de color.
+ * cambiar de color. El relleno usa el set Rounded (esquinas suaves) en vez
+ * del set Filled por defecto, más anguloso, para que la píldora se vea más
+ * armónica con sus propias formas circulares.
  */
 private sealed class Screen(val label: String, val filledIcon: ImageVector, val outlinedIcon: ImageVector) {
-    object Home : Screen("Inicio", Icons.Filled.Home, Icons.Outlined.Home)
-    object Servers : Screen("Servidores", Icons.Filled.AccountBox, Icons.Outlined.AccountBox)
-    object Logs : Screen("Logs", Icons.AutoMirrored.Filled.List, Icons.AutoMirrored.Outlined.List)
-    object About : Screen("Acerca de", Icons.Filled.Info, Icons.Outlined.Info)
+    object Home : Screen("Inicio", Icons.Rounded.Home, Icons.Outlined.Home)
+    object Servers : Screen("Servidores", Icons.Rounded.AccountBox, Icons.Outlined.AccountBox)
+    object Logs : Screen("Logs", Icons.AutoMirrored.Rounded.List, Icons.AutoMirrored.Outlined.List)
+    object About : Screen("Acerca de", Icons.Rounded.Info, Icons.Outlined.Info)
 }
 
 /** Alto de la píldora (52 + 2×8 de relleno) + separación por arriba y abajo. */
@@ -276,7 +279,10 @@ private fun PillItem(screen: Screen, selected: Boolean, onClick: () -> Unit) {
             imageVector = if (selected) screen.filledIcon else screen.outlinedIcon,
             contentDescription = screen.label,
             tint = content,
-            modifier = Modifier.scale(iconScale)
+            // Sin tamaño explícito quedan en 24dp (el default de Icon). 28dp
+            // es "un poco más grande" sin desbalancear la altura de 52dp de
+            // la píldora ni el texto labelLarge de al lado.
+            modifier = Modifier.size(28.dp).scale(iconScale)
         )
         AnimatedVisibility(
             visible = selected,
