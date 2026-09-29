@@ -83,10 +83,25 @@ fun ScreenContainer(
 ) {
     val scrollState = rememberScrollState()
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
-    val resolvedMaxWidth = maxContentWidth ?: adaptiveMaxWidth(screenWidthDp)
+    val headerMaxWidth = adaptiveMaxWidth(screenWidthDp)
+    val resolvedMaxWidth = maxContentWidth ?: headerMaxWidth
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.widthIn(max = resolvedMaxWidth).fillMaxSize()) {
-            if (title != null) ScreenHeader(title, actions)
+            // El encabezado siempre usa el ancho angosto de siempre (el mismo
+            // que Logs), no el de [maxContentWidth]: ese parámetro solo existe
+            // para ensanchar el CUERPO (p. ej. Servidores necesita más ancho
+            // para sus dos paneles uno junto al otro en apaisado). Si el
+            // encabezado heredara ese ancho más grande, sus acciones (como el
+            // botón de agregar) quedarían pegadas al borde real de la
+            // pantalla, mucho más cerca de la píldora de navegación de lo que
+            // están en cualquier otra pantalla.
+            if (title != null) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    Box(Modifier.widthIn(max = headerMaxWidth).fillMaxWidth()) {
+                        ScreenHeader(title, actions)
+                    }
+                }
+            }
             if (onRefresh != null) {
                 PullToRefreshBox(
                     isRefreshing = refreshing,
