@@ -235,4 +235,33 @@ object AppIcons {
             "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z"
         )
     }
+
+    /**
+     * Triángulo de tres colores inspirado en la paleta de marca de Google
+     * Drive (azul/verde/amarillo) para distinguir de un vistazo las
+     * tarjetas de perfiles de Drive. No es una réplica exacta del
+     * logotipo oficial, es una forma propia con esos tres colores. Va con
+     * Image, no con Icon: Icon fuerza un solo tinte y perdería los colores.
+     */
+    val DriveLogo: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        ImageVector.Builder(
+            name = "DriveLogo",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).addPath(
+            pathData = addPathNodes("M12,4 L3,19 L12,14 Z"),
+            fill = SolidColor(Color(0xFF00AC47))
+        ).addPath(
+            pathData = addPathNodes("M12,4 L12,14 L21,19 Z"),
+            fill = SolidColor(Color(0xFF2684FC))
+        ).addPath(
+            pathData = addPathNodes("M3,19 L21,19 L12,14 Z"),
+            fill = SolidColor(Color(0xFFFFBA00))
+        ).build()
+    }
 }
+
+/** Azul de marca de Drive, para acentos y fondos de tarjeta (no solo el logo). */
+val DriveBrandBlue = Color(0xFF2684FC)
