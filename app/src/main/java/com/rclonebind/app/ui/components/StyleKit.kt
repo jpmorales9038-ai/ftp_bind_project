@@ -35,11 +35,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.semantics.Role
+import com.rclonebind.app.root.RemoteProfile
+import com.rclonebind.app.root.RemoteType
+import com.rclonebind.app.root.S3Provider
+import com.rclonebind.app.root.s3Provider
 import androidx.compose.ui.unit.dp
 
 /**
@@ -279,6 +284,49 @@ object AppIcons {
             .facet(0xFFFFD836, "M173,33 L340,33 L512,333 L345,333 Z")            // amarillo
             .facet(0xFFF9BD00, "M324,295 L345,333 L512,333 Z")                   // naranja
             .build()
+    }
+
+    /**
+     * Logotipo de Oracle: el óvalo rojo (aro con extremos semicirculares),
+     * medido sobre el logo original de 819x512 y centrado en un viewport
+     * cuadrado para que ocupe el mismo recuadro que los demás iconos. Va con
+     * Image, no con Icon, para conservar el color de marca.
+     */
+    val OracleLogo: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        // Viewport 819x819; el logo mide 512 de alto, así que se desplaza
+        // (819 - 512) / 2 = 153.5 hacia abajo para quedar centrado.
+        ImageVector.Builder(
+            name = "OracleLogo",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 819f,
+            viewportHeight = 819f
+        ).addPath(
+            pathData = addPathNodes(
+                // Contorno exterior y hueco interior; EvenOdd deja el hueco vacío.
+                "M256,153.5 H563 A256,256 0 0 1 563,665.5 H256 A256,256 0 0 1 256,153.5 Z " +
+                    "M256,256.5 H563 A153,153 0 0 1 563,562.5 H256 A153,153 0 0 1 256,256.5 Z"
+            ),
+            pathFillType = PathFillType.EvenOdd,
+            fill = SolidColor(Color(0xFFC84735))
+        ).build()
+    }
+}
+
+/**
+ * Icono de un servidor. [branded] = true: lleva colores de marca propios y se
+ * dibuja con Image; false: es un icono de una sola tinta y se dibuja con Icon
+ * (tomando el color del tema).
+ */
+data class ServerIcon(val vector: ImageVector, val branded: Boolean)
+
+/** El icono que identifica a [profile]: uno distinto por tipo de servidor y, en S3, por proveedor. */
+fun serverIconFor(profile: RemoteProfile): ServerIcon = when (profile.type) {
+    RemoteType.FTP -> ServerIcon(AppIcons.Dns, branded = false)
+    RemoteType.DRIVE -> ServerIcon(AppIcons.DriveLogo, branded = true)
+    RemoteType.S3 -> when (profile.s3Provider) {
+        S3Provider.ORACLE -> ServerIcon(AppIcons.OracleLogo, branded = true)
+        else -> ServerIcon(AppIcons.Cloud, branded = false)
     }
 }
 

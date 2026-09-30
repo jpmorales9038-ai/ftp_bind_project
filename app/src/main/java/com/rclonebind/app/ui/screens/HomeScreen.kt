@@ -59,6 +59,7 @@ import com.rclonebind.app.ui.components.PerfTestSheet
 import com.rclonebind.app.ui.components.ScreenContainer
 import com.rclonebind.app.ui.components.SectionCard
 import com.rclonebind.app.ui.components.rememberIsDualPane
+import com.rclonebind.app.ui.components.serverIconFor
 import com.rclonebind.app.ui.theme.AppMotion
 import kotlin.math.roundToInt
 
@@ -279,11 +280,12 @@ private fun MountCard(
                 // Mini icono del tipo de servidor: logo de Drive (con sus
                 // colores, por eso Image) o el icono de servidor para FTP.
                 if (selected != null) {
-                    if (selected.type == RemoteType.DRIVE) {
-                        Image(AppIcons.DriveLogo, contentDescription = null, modifier = Modifier.size(20.dp))
+                    val icon = serverIconFor(selected)
+                    if (icon.branded) {
+                        Image(icon.vector, contentDescription = null, modifier = Modifier.size(20.dp))
                     } else {
                         Icon(
-                            if (selected.type == RemoteType.S3) AppIcons.Cloud else AppIcons.Dns,
+                            icon.vector,
                             contentDescription = null,
                             tint = scheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)

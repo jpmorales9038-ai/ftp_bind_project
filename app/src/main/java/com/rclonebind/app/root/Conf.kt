@@ -80,6 +80,32 @@ data class RemoteProfile(
     val s3: S3Options? = null
 )
 
+/**
+ * Proveedores S3 que la app distingue (cada uno con su propio icono, ver
+ * serverIconFor en StyleKit.kt). Se detecta por el dominio del endpoint, sin
+ * guardar nada extra en rclone.conf: para agregar un proveedor nuevo basta
+ * con una entrada aquí (con los sufijos de su dominio) y su icono.
+ */
+enum class S3Provider(val label: String, private val hostSuffixes: List<String>) {
+    ORACLE("Oracle Cloud", listOf(".oraclecloud.com")),
+    /** Cualquier otro servicio compatible con S3. */
+    OTHER("Otro proveedor", emptyList());
+
+    companion object {
+        fun fromEndpoint(endpoint: String): S3Provider {
+            val host = endpoint.trim().lowercase()
+                .substringAfter("://")
+                .substringBefore("/")
+                .substringBefore(":")
+            return entries.firstOrNull { p -> p.hostSuffixes.any { host.endsWith(it) } } ?: OTHER
+        }
+    }
+}
+
+/** Proveedor del servidor S3, o null si no es de tipo S3. */
+val RemoteProfile.s3Provider: S3Provider?
+    get() = s3?.let { S3Provider.fromEndpoint(it.endpoint) }
+
 /** Línea corta que identifica el servidor en tarjetas y en Inicio. */
 val RemoteProfile.subtitle: String
     get() = when (type) {

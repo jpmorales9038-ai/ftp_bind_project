@@ -148,12 +148,13 @@ private fun StackCard(
     ) {
         Column(Modifier.padding(horizontal = 24.dp, vertical = 20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (isDrive) {
-                    Image(
-                        AppIcons.DriveLogo,
-                        contentDescription = null,
-                        modifier = Modifier.size(if (isSelected) 26.dp else 22.dp)
-                    )
+                val icon = serverIconFor(profile)
+                val iconSize = if (isSelected) 26.dp else 22.dp
+                if (icon.branded) {
+                    Image(icon.vector, contentDescription = null, modifier = Modifier.size(iconSize))
+                } else if (profile.type == RemoteType.S3) {
+                    // S3 genérico: nube de una tinta (FTP no lleva icono en la tarjeta).
+                    Icon(icon.vector, contentDescription = null, modifier = Modifier.size(iconSize))
                 }
                 Text(
                     text = profile.name,

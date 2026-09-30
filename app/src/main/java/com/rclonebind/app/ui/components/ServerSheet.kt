@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -22,6 +24,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +58,7 @@ import com.rclonebind.app.root.DriveOptions
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RemoteType
 import com.rclonebind.app.root.S3Options
+import com.rclonebind.app.root.S3Provider
 import com.rclonebind.app.root.cleanS3Bucket
 import com.rclonebind.app.root.cleanS3Endpoint
 import com.rclonebind.app.root.oracleEndpoint
@@ -380,12 +384,18 @@ fun ServerSheet(
                     FilterChip(
                         selected = s3Oracle,
                         onClick = { s3Oracle = true },
-                        label = { Text("Oracle Cloud") }
+                        label = { Text(S3Provider.ORACLE.label) },
+                        leadingIcon = {
+                            Image(AppIcons.OracleLogo, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
                     )
                     FilterChip(
                         selected = !s3Oracle,
                         onClick = { s3Oracle = false },
-                        label = { Text("Otro proveedor") }
+                        label = { Text(S3Provider.OTHER.label) },
+                        leadingIcon = {
+                            Icon(AppIcons.Cloud, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
                     )
                 }
                 if (s3Oracle) {

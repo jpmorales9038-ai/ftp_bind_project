@@ -84,6 +84,7 @@ sequenceDiagram
 - Se inicia sesión con una clave de acceso: en Oracle, una **Customer Secret Key** (Perfil > Mi perfil > Claves secretas de cliente). La clave secreta solo existe en `rclone.conf` (chmod 600).
 - **Bucket** opcional (`bucket` o `bucket/carpeta`): se monta solo ese. Vacío monta la lista de buckets, pero Oracle exige permisos de listado; si tu clave no los tiene, escribe el bucket.
 - Al guardar, lista el bucket con la clave para confirmar endpoint, región, permisos y red, y traduce los errores típicos (`SignatureDoesNotMatch`, `AccessDenied`, `NoSuchBucket`...).
+- **Icono por proveedor:** cada proveedor S3 tiene su propio icono (Oracle Cloud lleva su logo; los demás, una nube genérica). El proveedor se detecta por el dominio del endpoint (`S3Provider` en `Conf.kt`); para agregar uno nuevo basta una entrada del enum con los sufijos de su dominio y su icono en `serverIconFor` (`StyleKit.kt`).
 - **Carpetas vacías:** se monta con `--s3-directory-markers` (rclone 1.64+): al crear una carpeta desde el explorador rclone sube un objeto vacío `carpeta/`, así se conserva aunque no tenga archivos y se puede montar vacía.
 - El bucket se guarda en la clave propia `bind_path` de la sección; rclone la ignora y la leen `mount.sh` y `check_remote.sh`.
 
