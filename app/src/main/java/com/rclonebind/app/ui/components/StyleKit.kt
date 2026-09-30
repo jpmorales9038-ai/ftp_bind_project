@@ -308,7 +308,7 @@ object AppIcons {
                     "M256,256.5 H563 A153,153 0 0 1 563,562.5 H256 A153,153 0 0 1 256,256.5 Z"
             ),
             pathFillType = PathFillType.EvenOdd,
-            fill = SolidColor(Color(0xFFC84735))
+            fill = SolidColor(OracleBrandRed)
         ).build()
     }
 }
@@ -332,3 +332,10 @@ fun serverIconFor(profile: RemoteProfile): ServerIcon = when (profile.type) {
 
 /** Azul de marca de Drive, para acentos y fondos de tarjeta (no solo el logo). */
 val DriveBrandBlue = Color(0xFF2684FC)
+
+/**
+ * Naranja/rojo de marca de Oracle (el color de su logo), para el fondo de su
+ * tarjeta. Como la tarjeta seleccionada usa este mismo color, el logo se
+ * dibuja en blanco sobre ella (ver StackCard) para no confundirse con el fondo.
+ */
+val OracleBrandRed = Color(0xFFC84735)

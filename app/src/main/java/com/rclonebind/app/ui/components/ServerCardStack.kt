@@ -30,6 +30,7 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -39,6 +40,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RemoteType
+import com.rclonebind.app.root.S3Provider
+import com.rclonebind.app.root.s3Provider
 import com.rclonebind.app.root.subtitle
 import com.rclonebind.app.ui.theme.AppMotion
 
@@ -108,11 +111,16 @@ private fun StackCard(
 
     val scheme = MaterialTheme.colorScheme
     val isDrive = profile.type == RemoteType.DRIVE
+    val isOracle = profile.s3Provider == S3Provider.ORACLE
     val container = when {
         // Perfiles de Drive: color de marca propio y fijo, no la paleta
         // rotativa por posición que usan los demás perfiles.
         isDrive && isSelected -> DriveBrandBlue
         isDrive -> DriveBrandBlue.copy(alpha = 0.16f).compositeOver(scheme.surfaceContainerHighest)
+        // Oracle: igual que Drive, con el color de su marca. Seleccionada es el
+        // naranja pleno; sin seleccionar, una versión tenue del mismo tono.
+        isOracle && isSelected -> OracleBrandRed
+        isOracle -> OracleBrandRed.copy(alpha = 0.16f).compositeOver(scheme.surfaceContainerHighest)
         isSelected -> scheme.primary
         else -> when (index % 3) {
             0 -> scheme.secondaryContainer
@@ -123,6 +131,8 @@ private fun StackCard(
     val content = when {
         isDrive && isSelected -> Color.White
         isDrive -> scheme.onSurface
+        isOracle && isSelected -> Color.White
+        isOracle -> scheme.onSurface
         isSelected -> scheme.onPrimary
         else -> when (index % 3) {
             0 -> scheme.onSecondaryContainer
@@ -151,7 +161,15 @@ private fun StackCard(
                 val icon = serverIconFor(profile)
                 val iconSize = if (isSelected) 26.dp else 22.dp
                 if (icon.branded) {
-                    Image(icon.vector, contentDescription = null, modifier = Modifier.size(iconSize))
+                    // El logo de Oracle es del mismo naranja que la tarjeta
+                    // seleccionada: sobre ella se dibuja en blanco (tinte que
+                    // conserva el hueco del óvalo) para que no desaparezca.
+                    Image(
+                        icon.vector,
+                        contentDescription = null,
+                        colorFilter = if (isOracle && isSelected) ColorFilter.tint(Color.White) else null,
+                        modifier = Modifier.size(iconSize)
+                    )
                 } else if (profile.type == RemoteType.S3) {
                     // S3 genérico: nube de una tinta (FTP no lleva icono en la tarjeta).
                     Icon(icon.vector, contentDescription = null, modifier = Modifier.size(iconSize))
