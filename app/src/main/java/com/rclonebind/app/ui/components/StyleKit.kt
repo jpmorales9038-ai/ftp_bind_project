@@ -3,6 +3,7 @@ package com.rclonebind.app.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -115,6 +116,11 @@ fun SectionCard(
  * Opción seleccionable tipo "Curve / Sliders": icono en un círculo más la
  * etiqueta. Seleccionada: relleno primaryContainer, contorno primary y el
  * círculo en primary. Sin seleccionar: relleno tenue y círculo neutro.
+ *
+ * [brandIcon] es para íconos con colores propios (p. ej. el triángulo de
+ * Drive): el círculo queda blanco fijo en vez de teñido con el tema, y el
+ * ícono se dibuja con sus propios colores (Image) en vez de un solo tinte
+ * (Icon).
  */
 @Composable
 fun OptionTile(
@@ -122,7 +128,8 @@ fun OptionTile(
     icon: ImageVector,
     selected: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    brandIcon: Boolean = false
 ) {
     val scheme = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(28.dp)
@@ -153,10 +160,14 @@ fun OptionTile(
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Box(
-            Modifier.size(44.dp).clip(CircleShape).background(badge),
+            Modifier.size(44.dp).clip(CircleShape).background(if (brandIcon) Color.White else badge),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = badgeContent)
+            if (brandIcon) {
+                Image(icon, contentDescription = null, modifier = Modifier.size(24.dp))
+            } else {
+                Icon(icon, contentDescription = null, tint = badgeContent)
+            }
         }
         Text(
             label,

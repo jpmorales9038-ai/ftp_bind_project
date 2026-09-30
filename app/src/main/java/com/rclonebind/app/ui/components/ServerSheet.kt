@@ -200,9 +200,10 @@ fun ServerSheet(
                     RemoteType.entries.forEach { option ->
                         OptionTile(
                             label = option.label,
-                            icon = if (option == RemoteType.FTP) AppIcons.Dns else AppIcons.Cloud,
+                            icon = if (option == RemoteType.FTP) AppIcons.Dns else AppIcons.DriveLogo,
                             selected = type == option,
                             onClick = { type = option },
+                            brandIcon = option == RemoteType.DRIVE,
                             modifier = Modifier.weight(1f)
                         )
                     }
