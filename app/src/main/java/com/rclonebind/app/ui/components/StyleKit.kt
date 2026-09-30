@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.semantics.Role
@@ -248,29 +249,36 @@ object AppIcons {
     }
 
     /**
-     * Triángulo de tres colores inspirado en la paleta de marca de Google
-     * Drive (azul/verde/amarillo) para distinguir de un vistazo las
-     * tarjetas de perfiles de Drive. No es una réplica exacta del
-     * logotipo oficial, es una forma propia con esos tres colores. Va con
-     * Image, no con Icon: Icon fuerza un solo tinte y perdería los colores.
+     * Logotipo de Google Drive con sus seis facetas (verde, verde oscuro,
+     * amarillo, naranja, azul y azul oscuro), trazado sobre un viewport de
+     * 512x512 a partir del diseño vectorial del logo. Va con Image, no con
+     * Icon: Icon fuerza un solo tinte y perdería los colores.
+     *
+     * Cada faceta lleva un contorno fino de su mismo color: tapa las
+     * líneas claras que el antialiasing deja entre formas contiguas.
      */
     val DriveLogo: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        fun ImageVector.Builder.facet(color: Long, path: String) = addPath(
+            pathData = addPathNodes(path),
+            fill = SolidColor(Color(color)),
+            stroke = SolidColor(Color(color)),
+            strokeLineWidth = 6f,
+            strokeLineJoin = StrokeJoin.Round
+        )
         ImageVector.Builder(
             name = "DriveLogo",
             defaultWidth = 24.dp,
             defaultHeight = 24.dp,
-            viewportWidth = 24f,
-            viewportHeight = 24f
-        ).addPath(
-            pathData = addPathNodes("M12,4 L3,19 L12,14 Z"),
-            fill = SolidColor(Color(0xFF00AC47))
-        ).addPath(
-            pathData = addPathNodes("M12,4 L12,14 L21,19 Z"),
-            fill = SolidColor(Color(0xFF2684FC))
-        ).addPath(
-            pathData = addPathNodes("M3,19 L21,19 L12,14 Z"),
-            fill = SolidColor(Color(0xFFFFBA00))
-        ).build()
+            viewportWidth = 512f,
+            viewportHeight = 512f
+        )
+            .facet(0xFF528EF9, "M83,478 L228,333 L512,333 L430,478 Z")          // azul
+            .facet(0xFF3A5ABD, "M83,478 L166,333 L228,333 Z")                    // azul oscuro
+            .facet(0xFF28B545, "M173,33 L0,332 L83,478 L166,333 L255,178 Z")     // verde
+            .facet(0xFF209B39, "M173,33 L255,178 L221,237 Z")                    // verde oscuro
+            .facet(0xFFFFD836, "M173,33 L340,33 L512,333 L345,333 Z")            // amarillo
+            .facet(0xFFF9BD00, "M324,295 L345,333 L512,333 Z")                   // naranja
+            .build()
     }
 }
 
