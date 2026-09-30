@@ -468,7 +468,12 @@ fun ServerSheet(
                 )
                 OutlinedTextField(
                     value = s3Bucket,
-                    onValueChange = { s3Bucket = cleanS3Bucket(it); s3BucketError = null },
+                    // Se guarda lo escrito tal cual y se limpia al guardar: limpiar
+                    // en cada tecla quitaba la "/" final apenas se escribía, y solo
+                    // se podía poner pegando "bucket/carpeta" de una vez.
+                    onValueChange = { s3Bucket = it; s3BucketError = null },
+                    // Teclado de direcciones: trae la "/" en la fila principal.
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     label = { Text("Bucket (opcional)") },
                     isError = s3BucketError != null,
                     supportingText = {
@@ -695,7 +700,8 @@ fun ServerSheet(
                         s3SecretError = if (s3Secret.isEmpty() && initialS3?.hasSecret != true) {
                             "Escribe la clave secreta"
                         } else null
-                        s3BucketError = validateS3Bucket(s3Bucket)
+                        val bucketClean = cleanS3Bucket(s3Bucket)
+                        s3BucketError = validateS3Bucket(bucketClean)
                         if (nameError == null && s3NamespaceError == null && s3RegionError == null &&
                             s3EndpointError == null && s3AccessKeyError == null &&
                             s3SecretError == null && s3BucketError == null
@@ -706,7 +712,7 @@ fun ServerSheet(
                                     endpoint = endpoint,
                                     region = region,
                                     accessKeyId = s3AccessKey.trim(),
-                                    bucket = s3Bucket
+                                    bucket = bucketClean
                                 ),
                                 s3Secret
                             )
