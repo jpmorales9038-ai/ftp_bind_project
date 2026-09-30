@@ -13,12 +13,15 @@ import com.rclonebind.app.root.DriveOptions
 import com.rclonebind.app.root.PerfMode
 import com.rclonebind.app.root.PerfTestParser
 import com.rclonebind.app.root.PerfTestState
+import com.rclonebind.app.root.PreloadStatus
+import com.rclonebind.app.root.PreloadStatusParser
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RootShell
 import com.rclonebind.app.root.cleanHost
 import com.rclonebind.app.root.cleanTargetPath
 import com.rclonebind.app.root.formatCacheKb
 import com.rclonebind.app.root.validateTargetPath
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -36,7 +39,8 @@ private class Snapshot(
     val perfMode: PerfMode,
     val cacheGb: Int?,
     val cacheKb: Long,
-    val ramCache: Boolean
+    val ramCache: Boolean,
+    val preloadRaw: String
 )
 
 class BindViewModel : ViewModel() {
@@ -82,6 +86,9 @@ class BindViewModel : ViewModel() {
     var ramCache by mutableStateOf(false)
         private set
     var perfTest by mutableStateOf(PerfTestState())
+        private set
+    /** Progreso de la precarga de assets a la caché (SectionCard de Inicio en perfil Máximo). Null = no aplica. */
+    var preloadStatus by mutableStateOf<PreloadStatus?>(null)
         private set
     /** Mensaje de una sola vez; la UI lo muestra en un snackbar y lo consume. */
     var message by mutableStateOf<String?>(null)
@@ -129,7 +136,8 @@ class BindViewModel : ViewModel() {
                 perfMode = RootShell.readPerfMode(),
                 cacheGb = RootShell.readCacheGb(),
                 cacheKb = RootShell.cacheSizeKb(),
-                ramCache = RootShell.readRamCache()
+                ramCache = RootShell.readRamCache(),
+                preloadRaw = RootShell.preloadStatus()
             )
         }
 
@@ -155,6 +163,14 @@ class BindViewModel : ViewModel() {
         mountedRemote = if (isMounted) {
             Regex("\"remote\":\"([^\"]*)\"").find(snap.status)?.groupValues?.get(1)
         } else null
+        preloadStatus = PreloadStatusParser.parse(snap.preloadRaw)
+        // mount.sh lanza la precarga sola justo después de montar: si sigue
+        // corriendo (recién montado, o se reabrió la app a mitad de una
+        // precarga larga) y nada la está siguiendo todavía, se retoma el
+        // sondeo para que la barra de progreso avance sola.
+        if (preloadStatus?.running == true && preloadJob?.isActive != true) {
+            preloadJob = viewModelScope.launch { watchPreload() }
+        }
     }
 
     fun selectProfile(name: String) = viewModelScope.launch {
@@ -317,9 +333,76 @@ class BindViewModel : ViewModel() {
         perfTest = PerfTestState()
     }
 
+    private var preloadJob: Job? = null
+
+    /**
+     * Relanza la precarga (scripts/preload.sh) a mano: sirve tanto para
+     * reintentar como para volver a comprobar el remoto después de agregar
+     * archivos nuevos (ya montado, sin tener que desmontar y montar de
+     * nuevo). Mientras corre queda visible en la tarjeta de Inicio; al
+     * terminar en 100% el bind queda tan rápido como el almacenamiento
+     * local para lo que ya se precargó.
+     */
+    fun preloadNow() = viewModelScope.launch {
+        if (!isMounted) {
+            message = "Monta el servidor primero"
+            return@launch
+        }
+        val started = withContext(Dispatchers.IO) { RootShell.preloadStart() }
+        if (!started.success) {
+            message = "No se pudo iniciar la precarga: ${started.output.takeLast(200)}"
+            return@launch
+        }
+        preloadJob?.cancel()
+        preloadJob = launch { watchPreload(announceIfNeverStarted = true) }
+    }
+
+    /**
+     * Sondea preload_status.json. Antes de esta corrección se rendía en la
+     * primera lectura que no mostrara "running":true — y esa primera
+     * lectura, 1.5s después de lanzar el script, casi siempre llegaba ANTES
+     * de que preload.sh terminara de recorrer el remoto con find (puede
+     * tardar bastante más que eso en un FTP grande o lento) y escribiera su
+     * primer estado. Resultado: tanto el botón manual como el arranque
+     * automático tras montar parecían "no hacer nada", aunque la precarga sí
+     * corriera de verdad en segundo plano.
+     *
+     * Ahora se distingue "todavía no arrancó" (se sigue esperando, hasta
+     * [PRELOAD_START_GRACE_MS]) de "arrancó y ya terminó" (recién ahí se
+     * corta el sondeo). [PRELOAD_TIMEOUT_MS] sigue como red de seguridad por
+     * si algo se queda corriendo para siempre.
+     */
+    private suspend fun CoroutineScope.watchPreload(announceIfNeverStarted: Boolean = false) {
+        val startDeadline = SystemClock.elapsedRealtime() + PRELOAD_START_GRACE_MS
+        val hardDeadline = SystemClock.elapsedRealtime() + PRELOAD_TIMEOUT_MS
+        var everRunning = false
+        while (isActive) {
+            delay(PRELOAD_POLL_MS)
+            val output = withContext(Dispatchers.IO) { RootShell.preloadStatus() }
+            val status = PreloadStatusParser.parse(output)
+            preloadStatus = status
+            val now = SystemClock.elapsedRealtime()
+            if (status?.running == true) {
+                everRunning = true
+            } else if (everRunning) {
+                return // Corría y ya terminó (o falló a medias): se corta acá.
+            } else if (now > startDeadline) {
+                // Nunca llegó a arrancar: perfil/remoto que no cachea lecturas
+                // completas (comportamiento normal), o el script falló antes
+                // de escribir nada.
+                if (announceIfNeverStarted) {
+                    message = "La precarga no llegó a iniciar. Revisa Logs para más detalle."
+                }
+                return
+            }
+            if (now > hardDeadline) return
+        }
+    }
+
     override fun onCleared() {
         authJob?.cancel()
         perfJob?.cancel()
+        preloadJob?.cancel()
         super.onCleared()
     }
 
@@ -338,10 +421,11 @@ class BindViewModel : ViewModel() {
         }
         val mounted = isMounted
         val current = mountedRemote
+        val onlyUnmounting = mounted && (current == null || current == target)
         busy = true
         val result = withContext(Dispatchers.IO) {
             when {
-                mounted && (current == null || current == target) -> RootShell.unmount()
+                onlyUnmounting -> RootShell.unmount()
                 mounted -> {
                     // Hay otro servidor montado: se desmonta y se monta el seleccionado.
                     RootShell.unmount()
@@ -353,6 +437,16 @@ class BindViewModel : ViewModel() {
         message = if (result.success) null else "Error: ${result.output.takeLast(200)}"
         reload()
         busy = false
+
+        // mount.sh ya lanzó la precarga sola en segundo plano (ver
+        // preload.sh). Se la sigue desde ya en vez de esperar a que algo
+        // más (un "deslizar para actualizar") la note, porque puede tardar
+        // en arrancar (recorre el remoto con find) y terminar sin que nadie
+        // haya vuelto a leer el estado mientras tanto.
+        if (result.success && !onlyUnmounting) {
+            preloadJob?.cancel()
+            preloadJob = launch { watchPreload() }
+        }
     }
 
     fun setTargetPath(path: String) = viewModelScope.launch {
@@ -465,5 +559,14 @@ class BindViewModel : ViewModel() {
         const val PERF_TIMEOUT_MS = 300_000L
         // El script corta a los 300 s; esto es solo la red de seguridad de la app.
         const val AUTH_TIMEOUT_MS = 330_000L
+        // La precarga puede bajar varios GB de assets de juego: se sondea
+        // sin apuro y con un margen amplio antes de dar por perdido el seguimiento
+        // (el script en sí no tiene límite de tiempo, sigue en segundo plano).
+        const val PRELOAD_POLL_MS = 1500L
+        const val PRELOAD_TIMEOUT_MS = 30 * 60_000L
+        // Cuánto se espera a que preload.sh escriba su primer "running":true.
+        // Recorrer el remoto con find (antes de poder escribir nada) puede
+        // tardar bastante en un FTP grande o lento.
+        const val PRELOAD_START_GRACE_MS = 60_000L
     }
 }

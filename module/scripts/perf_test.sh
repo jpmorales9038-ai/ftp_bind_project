@@ -114,6 +114,25 @@ find_rclone_pid() {
     done
 }
 
+# ¿Hay de verdad un proceso de precarga corriendo? preload.lock es una carpeta
+# (mkdir), y una carpeta no sabe si quien la creó sigue vivo: si el sistema
+# mató preload.sh de un golpe (poca batería, poca memoria) sin dejarlo pasar
+# por su propio trap de limpieza, el candado queda ahí pero nadie está
+# compitiendo por la red. Mismo patrón y mismo respaldo que find_rclone_pid.
+preload_running() {
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -f "$MODDIR/scripts/preload.sh" >/dev/null 2>&1
+        return
+    fi
+    for d in /proc/[0-9]*; do
+        c="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)"
+        case "$c" in
+            *"$MODDIR/scripts/preload.sh"*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 # ---------------------------------------------------------------- mount
 step mount RUN "Comprobando el montaje"
 if ! grep -q '"mounted":true' "$STATUS_FILE" 2>/dev/null; then
@@ -165,21 +184,38 @@ case "$CUR" in
 esac
 NMISS=0
 SHORT=""
-flag=""
-for w in $MOUNT_OPTS; do
-    case "$w" in
-        --*) flag="$w" ;;
+miss() {
+    NMISS=$(( NMISS + 1 ))
+    # Solo se nombran las tres primeras para que el texto quepa en pantalla.
+    if [ "$NMISS" -le 3 ]; then
+        if [ -z "$SHORT" ]; then SHORT="$1"; else SHORT="$SHORT, $1"; fi
+    fi
+}
+
+# set -- + shift en vez de "for w in $MOUNT_OPTS": hace falta mirar el
+# token SIGUIENTE a cada "--flag" para saber si es su valor o si en
+# realidad es la flag booleana siguiente (--vfs-fast-fingerprint, en el
+# perfil Máximo, no lleva valor). Con el "for" de antes esa flag booleana
+# nunca se llegaba a comprobar: el "--flag" de al lado la pisaba como si
+# fuera su valor antes de que el chequeo la mirara.
+set -- $MOUNT_OPTS
+while [ "$#" -gt 0 ]; do
+    flag="$1"
+    case "$2" in
+        ''|--*)
+            # Booleana: sin valor, se busca la flag sola.
+            case "$CUR" in
+                *" $flag "*) ;;
+                *) miss "$flag" ;;
+            esac
+            shift
+            ;;
         *)
             case "$CUR" in
-                *" $flag $w "*) ;;
-                *)
-                    NMISS=$(( NMISS + 1 ))
-                    # Solo se nombran las tres primeras para que el texto quepa en pantalla.
-                    if [ "$NMISS" -le 3 ]; then
-                        if [ -z "$SHORT" ]; then SHORT="$flag"; else SHORT="$SHORT, $flag"; fi
-                    fi
-                    ;;
+                *" $flag $2 "*) ;;
+                *) miss "$flag" ;;
             esac
+            shift 2
             ;;
     esac
 done
@@ -203,6 +239,9 @@ fi
 step space RUN "Midiendo el espacio libre"
 set -- $(df -k "$CACHE_DIR" 2>/dev/null | tail -n 1)
 FREE_KB="$4"
+# En RAM el tmpfs mide caché + reserva (mount.sh), así que "libre" siempre es
+# menor que eso una vez que se llena. Se compara el tamaño del tmpfs, no lo libre.
+[ "$CACHE_IS_RAM" = 1 ] && FREE_KB="$2"
 case "$FREE_KB" in
     ''|*[!0-9]*)
         step space WARN "No se pudo leer el espacio libre."
@@ -220,7 +259,11 @@ case "$FREE_KB" in
                 WHERE="en el almacenamiento"
                 [ "$CACHE_IS_RAM" = 1 ] && WHERE="en RAM"
                 if [ "$FREE_GB" -lt $(( NEED + RESERVE )) ]; then
-                    step space WARN "Solo quedan $FREE_GB GB libres $WHERE: no caben la caché de $NEED GB y la reserva de $RESERVE GB. rclone la irá recortando."
+                    if [ "$CACHE_IS_RAM" = 1 ]; then
+                        step space WARN "El tmpfs en RAM mide solo $FREE_GB GB: no caben la caché de $NEED GB y la reserva de $RESERVE GB. Desmonta y vuelve a montar para reajustarlo."
+                    else
+                        step space WARN "Solo quedan $FREE_GB GB libres $WHERE: no caben la caché de $NEED GB y la reserva de $RESERVE GB. rclone la irá recortando."
+                    fi
                 else
                     step space OK "$FREE_GB GB libres $WHERE, de sobra para una caché de $NEED GB."
                 fi
@@ -297,7 +340,9 @@ if [ -z "$F" ]; then
     finish
 fi
 
-SIZE_MB=$(( $(stat -c %s "$F" 2>/dev/null || echo 0) / 1048576 ))
+SIZE_MB="$(stat -c %s "$F" 2>/dev/null | awk '{printf "%d", $1 / 1048576}')"
+# (awk y no $(( )): el mksh de Android usa 32 bits y desbordaba con archivos de más de 2 GiB)
+[ -z "$SIZE_MB" ] && SIZE_MB=0
 MAXSKIP=$(( SIZE_MB - TEST_MB ))
 [ "$MAXSKIP" -lt 0 ] && MAXSKIP=0
 # Tramo al azar del archivo: uno ya leído antes estaría en la caché de rclone y
@@ -342,6 +387,25 @@ GROW_KB=$(( C1 - C0 ))
 GROW_MB=$(( GROW_KB / 1024 ))
 DETAIL="Primera vez $(fmt10 "$CX") MB/s, segunda $(fmt10 "$WX") MB/s, la caché en disco creció $GROW_MB MB."
 
+# Dos cosas que falsean la medición: una precarga todavía corriendo (compite
+# por el ancho de banda) y un remoto ya precargado (la primera lectura sale de
+# la caché y no mide la nube).
+PRE_WARN=0
+if [ -d "$MODDIR/preload.lock" ]; then
+    if preload_running; then
+        PRE_WARN=1
+        DETAIL="$DETAIL La precarga sigue corriendo y compite por la red: espera a que termine para medir."
+    else
+        # Candado de una precarga que no terminó bien (el sistema la mató sin
+        # avisar): no hay nada compitiendo por la red. Se limpia de una vez
+        # para no depender del próximo montaje para soltarlo.
+        rm -rf "$MODDIR/preload.lock" 2>/dev/null
+    fi
+fi
+if [ "$PRE_WARN" = 0 ] && [ -f "$MODDIR/config/preload_done_$REMOTE" ]; then
+    DETAIL="$DETAIL El servidor está precargado: la primera lectura sale de la caché y no mide la velocidad real de la nube."
+fi
+
 # Último resultado del otro perfil con el mismo tipo de servidor, para poder
 # comparar Equilibrado contra Máximo probando una vez con cada uno.
 if [ "$PERF" = max ]; then OTHER=balanced; OL="Equilibrado"; else OTHER=max; OL="Máximo"; fi
@@ -355,7 +419,9 @@ echo "$CX $WX" > "$MODDIR/config/perf_last_${PERF:-balanced}_$RTYPE"
 
 case "$CACHE_MODE" in
     full)
-        if [ "$GROW_KB" -ge $(( TEST_MB * 512 )) ]; then
+        if [ "$PRE_WARN" = 1 ]; then
+            step read WARN "$DETAIL"
+        elif [ "$GROW_KB" -ge $(( TEST_MB * 512 )) ]; then
             step read OK "$DETAIL"
         elif [ "$CX" -ge 1000 ]; then
             step read OK "$DETAIL La primera lectura ya fue muy rápida: ese tramo probablemente ya estaba en caché."

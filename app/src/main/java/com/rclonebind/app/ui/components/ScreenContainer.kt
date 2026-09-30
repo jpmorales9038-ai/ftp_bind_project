@@ -1,5 +1,9 @@
 package com.rclonebind.app.ui.components
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,22 +13,36 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.rclonebind.app.ui.theme.AppMotion
+import kotlinx.coroutines.isActive
 
 /**
  * Espacio inferior que ocupa la barra flotante. Las pantallas lo suman a su
@@ -34,9 +52,12 @@ import androidx.compose.ui.unit.dp
 val LocalContentBottomInset = compositionLocalOf { 0.dp }
 
 /**
- * Igual que [LocalContentBottomInset] pero para el borde derecho: en modo
- * apaisado la píldora se muda ahí, así que el contenido reserva ese espacio
- * en vez del inferior.
+ * Espacio a la derecha que ocupa la píldora cuando se mueve a ese costado
+ * (apaisado). En retrato vale 0 (ahí el espacio lo reserva el inset
+ * inferior de arriba). Lo aplica [ScreenContainer] en las 4 pantallas por
+ * igual, así que ninguna pantalla necesita saber de la píldora por su
+ * cuenta: antes, Inicio y Servidores (las que usan más ancho en apaisado
+ * con su doble panel) quedaban con contenido tapado detrás de la píldora.
  */
 val LocalContentEndInset = compositionLocalOf { 0.dp }
 
@@ -83,36 +104,23 @@ fun ScreenContainer(
 ) {
     val scrollState = rememberScrollState()
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
-    val headerMaxWidth = adaptiveMaxWidth(screenWidthDp)
-    val resolvedMaxWidth = maxContentWidth ?: headerMaxWidth
+    val resolvedMaxWidth = maxContentWidth ?: adaptiveMaxWidth(screenWidthDp)
+    val pullState = if (onRefresh != null) rememberPullToRefreshState() else null
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.widthIn(max = resolvedMaxWidth).fillMaxSize()) {
-            // El encabezado siempre usa el ancho angosto de siempre (el mismo
-            // que Logs), no el de [maxContentWidth]: ese parámetro solo existe
-            // para ensanchar el CUERPO (p. ej. Servidores necesita más ancho
-            // para sus dos paneles uno junto al otro en apaisado). Si el
-            // encabezado heredara ese ancho más grande, sus acciones (como el
-            // botón de agregar) quedarían pegadas al borde real de la
-            // pantalla, mucho más cerca de la píldora de navegación de lo que
-            // están en cualquier otra pantalla.
+        Column(
+            Modifier
+                .widthIn(max = resolvedMaxWidth)
+                .fillMaxSize()
+                .let { base ->
+                    if (pullState != null && onRefresh != null) {
+                        base.pullToRefresh(isRefreshing = refreshing, state = pullState, onRefresh = onRefresh)
+                    } else base
+                }
+        ) {
             if (title != null) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-                    Box(Modifier.widthIn(max = headerMaxWidth).fillMaxWidth()) {
-                        ScreenHeader(title, actions)
-                    }
-                }
+                ScreenHeader(title, actions, LocalContentEndInset.current, pullState, refreshing)
             }
-            if (onRefresh != null) {
-                PullToRefreshBox(
-                    isRefreshing = refreshing,
-                    onRefresh = onRefresh,
-                    modifier = Modifier.weight(1f).fillMaxWidth()
-                ) {
-                    ScreenBody(Modifier, scroll, scrollState, content)
-                }
-            } else {
-                ScreenBody(Modifier.weight(1f).fillMaxWidth(), scroll, scrollState, content)
-            }
+            ScreenBody(Modifier.weight(1f).fillMaxWidth(), scroll, scrollState, content)
         }
     }
 }
@@ -152,20 +160,104 @@ private fun adaptiveMaxWidth(screenWidthDp: Int): Dp {
 }
 
 @Composable
-private fun ScreenHeader(title: String, actions: @Composable RowScope.() -> Unit) {
-    Row(
+private fun ScreenHeader(
+    title: String,
+    actions: @Composable RowScope.() -> Unit,
+    endInset: Dp,
+    pullState: PullToRefreshState?,
+    refreshing: Boolean
+) {
+    Column {
+        if (pullState != null) {
+            PullStretchIndicator(pullState, refreshing)
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 24.dp, end = 12.dp + endInset, top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.displaySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            actions()
+        }
+    }
+}
+
+/** Cuánto "estira" como máximo el encabezado al tirar del contenido hacia abajo. */
+private val PullStretchMaxHeight = 32.dp
+
+/**
+ * Reemplaza al spinner de Material3 (que aparece flotando sobre el
+ * contenido y solo se nota una vez que ya se scrolleó hasta arriba de
+ * todo). Este vive siempre pegado al encabezado: a medida que se tira del
+ * contenido hacia abajo, el encabezado "se estira" (crece este espacio de
+ * arriba) y el ícono aparece agrandándose y girando con la propia tracción
+ * del dedo; al soltar pasado el umbral, sigue girando solo mientras
+ * refresca. [PullToRefreshState.distanceFraction] ya viene en 0f..1f+
+ * (puede pasarse de 1 si se tira de más), así que alcanza con acotarlo
+ * para el alto/escala (que sí tienen un tope visual), pero NO para la
+ * rotación: dejarla sin tope es lo que hace que tirar más haga girar más
+ * (más de una vuelta si se tira bastante) en vez de quedarse siempre en
+ * un mismo medio giro fijo.
+ */
+@Composable
+private fun PullStretchIndicator(state: PullToRefreshState, refreshing: Boolean) {
+    val pull = state.distanceFraction.coerceIn(0f, 1f)
+    val pullRaw = state.distanceFraction.coerceAtLeast(0f)
+
+    val heightFraction by animateFloatAsState(
+        targetValue = if (refreshing) 1f else pull,
+        animationSpec = AppMotion.effects(),
+        label = "pullStretchHeight"
+    )
+
+    // Un solo Animatable para toda la rotación en vez de dos animaciones
+    // independientes (una para "tirando" y un spinner aparte para
+    // "refrescando"): así el giro es siempre el mismo movimiento continuo,
+    // sin el salto que había antes al pasar de un estado al otro.
+    val rotation = remember { Animatable(0f) }
+
+    // Mientras se tira (no refrescando), la rotación seguía al dedo.
+    LaunchedEffect(pullRaw, refreshing) {
+        if (!refreshing) {
+            rotation.animateTo(pullRaw * 360f, animationSpec = AppMotion.effects())
+        }
+    }
+    // Al empezar a refrescar, sigue girando a velocidad constante desde el
+    // ángulo exacto donde quedó (rotation.value ya tiene ese valor).
+    LaunchedEffect(refreshing) {
+        if (refreshing) {
+            while (isActive) {
+                rotation.animateTo(
+                    targetValue = rotation.value + 360f,
+                    animationSpec = tween(durationMillis = 700, easing = LinearEasing)
+                )
+            }
+        }
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .height(PullStretchMaxHeight * heightFraction),
+        contentAlignment = Alignment.BottomCenter
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.displaySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
-        actions()
+        if (heightFraction > 0.05f) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .size(20.dp)
+                    .scale(heightFraction)
+                    .rotate(rotation.value % 360f)
+            )
+        }
     }
 }

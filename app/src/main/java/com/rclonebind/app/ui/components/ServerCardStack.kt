@@ -3,6 +3,7 @@ package com.rclonebind.app.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -25,7 +27,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -101,15 +106,28 @@ private fun StackCard(
     val animatedHeight by animateDpAsState(height, AppMotion.spatial(), label = "cardHeight")
 
     val scheme = MaterialTheme.colorScheme
-    val container = if (isSelected) scheme.primary else when (index % 3) {
-        0 -> scheme.secondaryContainer
-        1 -> scheme.tertiaryContainer
-        else -> scheme.surfaceContainerHighest
+    val isDrive = profile.type == RemoteType.DRIVE
+    val container = when {
+        // Perfiles de Drive: color de marca propio y fijo, no la paleta
+        // rotativa por posición que usan los demás perfiles.
+        isDrive && isSelected -> DriveBrandBlue
+        isDrive -> DriveBrandBlue.copy(alpha = 0.16f).compositeOver(scheme.surfaceContainerHighest)
+        isSelected -> scheme.primary
+        else -> when (index % 3) {
+            0 -> scheme.secondaryContainer
+            1 -> scheme.tertiaryContainer
+            else -> scheme.surfaceContainerHighest
+        }
     }
-    val content = if (isSelected) scheme.onPrimary else when (index % 3) {
-        0 -> scheme.onSecondaryContainer
-        1 -> scheme.onTertiaryContainer
-        else -> scheme.onSurface
+    val content = when {
+        isDrive && isSelected -> Color.White
+        isDrive -> scheme.onSurface
+        isSelected -> scheme.onPrimary
+        else -> when (index % 3) {
+            0 -> scheme.onSecondaryContainer
+            1 -> scheme.onTertiaryContainer
+            else -> scheme.onSurface
+        }
     }
     val bg by animateColorAsState(container, AppMotion.effects(), label = "cardBg")
     val fg by animateColorAsState(content, AppMotion.effects(), label = "cardFg")
@@ -128,12 +146,21 @@ private fun StackCard(
             .semantics { this.selected = isSelected }
     ) {
         Column(Modifier.padding(horizontal = 24.dp, vertical = 20.dp)) {
-            Text(
-                text = profile.name,
-                style = if (isSelected) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (isDrive) {
+                    Image(
+                        AppIcons.DriveLogo,
+                        contentDescription = null,
+                        modifier = Modifier.size(if (isSelected) 26.dp else 22.dp)
+                    )
+                }
+                Text(
+                    text = profile.name,
+                    style = if (isSelected) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             Text(
                 text = when {
                     profile.type == RemoteType.DRIVE -> RemoteType.DRIVE.label

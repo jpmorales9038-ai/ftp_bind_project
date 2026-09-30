@@ -1,6 +1,7 @@
 package com.rclonebind.app.ui.screens
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -20,6 +22,7 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -35,12 +38,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
 import com.rclonebind.app.ui.components.AppIcons
 import com.rclonebind.app.root.CACHE_GB_MAX
 import com.rclonebind.app.root.CACHE_GB_MIN
 import com.rclonebind.app.root.PerfMode
+import com.rclonebind.app.root.RemoteType
 import com.rclonebind.app.root.defaultCacheGb
 import com.rclonebind.app.root.formatCacheKb
 import com.rclonebind.app.ui.components.DualPaneContentWidth
@@ -157,6 +165,9 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                         onRunPerfTest = onRunPerfTest,
                         onRequestRamCache = { showRamCacheConfirm = true }
                     )
+                    if (vm.perfMode == PerfMode.MAX) {
+                        PreloadCard(vm, mounted)
+                    }
                 }
             }
         } else {
@@ -174,6 +185,9 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
                 onRunPerfTest = onRunPerfTest,
                 onRequestRamCache = { showRamCacheConfirm = true }
             )
+            if (vm.perfMode == PerfMode.MAX) {
+                PreloadCard(vm, mounted)
+            }
         }
     }
 
@@ -261,17 +275,45 @@ private fun MountCard(
                 modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.weight(1f)) {
-                    // v1.5.2: antes iba en titleLarge/bodyMedium, más grande
-                    // que el resto de las tarjetas. Se baja a titleMedium/
-                    // bodySmall para que quede al mismo tamaño que los
-                    // títulos y descripciones del apartado Rendimiento.
-                    Text(selected?.name ?: "Ninguno", style = MaterialTheme.typography.titleMedium)
-                    if (selected != null) {
+                // Mini icono del tipo de servidor: logo de Drive (con sus
+                // colores, por eso Image) o el icono de servidor para FTP.
+                if (selected != null) {
+                    if (selected.type == RemoteType.DRIVE) {
+                        Image(AppIcons.DriveLogo, contentDescription = null, modifier = Modifier.size(20.dp))
+                    } else {
+                        Icon(
+                            AppIcons.Dns,
+                            contentDescription = null,
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                }
+                // Mismo estilo que la carpeta de destino, centrado
+                // verticalmente. La línea secundaria (usuario@host) solo
+                // se dibuja si tiene texto: en Drive el host va vacío y
+                // un Text vacío igual ocupa una línea, lo que descentraba
+                // el nombre.
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                    Text(
+                        selected?.name ?: "Ninguno",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val detail = when {
+                        selected == null || selected.type == RemoteType.DRIVE -> ""
+                        selected.user.isEmpty() -> selected.host
+                        else -> "${selected.user}@${selected.host}"
+                    }
+                    if (detail.isNotBlank()) {
                         Text(
-                            if (selected.user.isEmpty()) selected.host else "${selected.user}@${selected.host}",
+                            detail,
                             style = MaterialTheme.typography.bodySmall,
-                            color = scheme.onSurfaceVariant
+                            color = scheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -382,9 +424,14 @@ private fun PerfCard(
         // sentido en modo Máximo (en Equilibrado no se usa un tamaño
         // configurable), así que se oculta por completo en Equilibrado.
         if (vm.perfMode == PerfMode.MAX) {
+            val haptics = LocalHapticFeedback.current
             val custom = vm.cacheGb
             val effective = custom ?: defaultCacheGb(vm.perfMode)
             var draft by remember(effective) { mutableStateOf(effective.toFloat()) }
+            // SegmentTick en cada GB que cruza el dedo (no en cada píxel):
+            // el mismo háptico suave y discreto que ya usa la píldora de
+            // navegación, en vez del tic más fuerte por defecto del Slider.
+            var lastTick by remember(effective) { mutableStateOf(effective) }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -399,7 +446,14 @@ private fun PerfCard(
             }
             Slider(
                 value = draft,
-                onValueChange = { draft = it },
+                onValueChange = {
+                    draft = it
+                    val rounded = it.roundToInt()
+                    if (rounded != lastTick) {
+                        lastTick = rounded
+                        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    }
+                },
                 onValueChangeFinished = { vm.setCacheGb(draft.roundToInt()) },
                 valueRange = CACHE_GB_MIN.toFloat()..CACHE_GB_MAX.toFloat(),
                 steps = CACHE_GB_MAX - CACHE_GB_MIN - 1
@@ -470,6 +524,95 @@ private fun PerfCard(
             TextButton(onClick = { vm.clearCache() }, enabled = !mounted && !vm.busy) {
                 Text("Borrar caché")
             }
+        }
+    }
+}
+
+/**
+ * Progreso de scripts/preload.sh y botón para relanzarlo a mano. Solo se
+ * muestra en perfil Máximo (es el único que cachea lecturas completas de
+ * FTP; Drive las cachea en cualquier perfil, pero el botón manual solo
+ * tiene sentido junto al resto de los controles de rendimiento). El
+ * objetivo: que al llegar la barra a 100%, lo que ya se precargó se lea
+ * desde el teléfono, sin esperar a la red.
+ */
+@Composable
+private fun PreloadCard(vm: BindViewModel, mounted: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    val status = vm.preloadStatus
+    val hasData = status != null && status.selectedFiles > 0
+
+    SectionCard(
+        title = "Precarga de archivos",
+        icon = AppIcons.Download,
+        subtitle = "Baja los archivos del remoto a la caché local del teléfono antes de que se " +
+            "necesiten. Ya precargados, se leen desde ahí en vez de esperar la descarga en el momento."
+    ) {
+        if (!hasData) {
+            Text(
+                if (mounted) {
+                    "Todavía no hay nada precargado. Se hace sola al montar, o tócalo abajo."
+                } else {
+                    "Monta un servidor para poder precargarlo."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = scheme.onSurfaceVariant
+            )
+        } else {
+            val s = status!!
+            val pct = (s.fraction * 100).roundToInt()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    when {
+                        s.running -> "Precargando…"
+                        s.finished -> "Listo"
+                        else -> "Incompleta"
+                    },
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text("$pct%", style = MaterialTheme.typography.titleMedium, color = scheme.primary)
+            }
+            LinearProgressIndicator(
+                progress = { s.fraction },
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))
+            )
+            Text(
+                "${s.doneMb} / ${s.selectedMb} MB · ${s.doneFiles} / ${s.selectedFiles} archivos" +
+                    if (s.totalFiles > s.selectedFiles) " (de ${s.totalFiles} en el remoto)" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant
+            )
+            if (s.finished) {
+                Text(
+                    "Todo en caché local: se comporta como almacenamiento local para lo que ya se precargó.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.primary
+                )
+            } else if (s.totalFiles > s.selectedFiles) {
+                Text(
+                    "El remoto tiene más archivos de los que entran en el tamaño de caché configurado.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant
+                )
+            }
+        }
+
+        FilledTonalButton(
+            onClick = { vm.preloadNow() },
+            enabled = mounted && status?.running != true,
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth().height(56.dp)
+        ) {
+            Icon(AppIcons.Download, contentDescription = null)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (status?.finished == true) "Precargar de nuevo" else "Precargar ahora",
+                style = MaterialTheme.typography.titleMedium
+            )
         }
     }
 }

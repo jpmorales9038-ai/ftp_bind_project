@@ -3,6 +3,7 @@ package com.rclonebind.app.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.semantics.Role
@@ -115,6 +117,11 @@ fun SectionCard(
  * Opción seleccionable tipo "Curve / Sliders": icono en un círculo más la
  * etiqueta. Seleccionada: relleno primaryContainer, contorno primary y el
  * círculo en primary. Sin seleccionar: relleno tenue y círculo neutro.
+ *
+ * [brandIcon] es para íconos con colores propios (p. ej. el triángulo de
+ * Drive): el círculo queda blanco fijo en vez de teñido con el tema, y el
+ * ícono se dibuja con sus propios colores (Image) en vez de un solo tinte
+ * (Icon).
  */
 @Composable
 fun OptionTile(
@@ -122,7 +129,8 @@ fun OptionTile(
     icon: ImageVector,
     selected: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    brandIcon: Boolean = false
 ) {
     val scheme = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(28.dp)
@@ -153,10 +161,14 @@ fun OptionTile(
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Box(
-            Modifier.size(44.dp).clip(CircleShape).background(badge),
+            Modifier.size(44.dp).clip(CircleShape).background(if (brandIcon) Color.White else badge),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = badgeContent)
+            if (brandIcon) {
+                Image(icon, contentDescription = null, modifier = Modifier.size(24.dp))
+            } else {
+                Icon(icon, contentDescription = null, tint = badgeContent)
+            }
         }
         Text(
             label,
@@ -228,4 +240,47 @@ object AppIcons {
             "M20,13H4c-0.55,0 -1,0.45 -1,1v6c0,0.55 0.45,1 1,1h16c0.55,0 1,-0.45 1,-1v-6c0,-0.55 -0.45,-1 -1,-1zM7,19c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2zM20,3H4c-0.55,0 -1,0.45 -1,1v6c0,0.55 0.45,1 1,1h16c0.55,0 1,-0.45 1,-1V4c0,-0.55 -0.45,-1 -1,-1zM7,9c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2z"
         )
     }
+
+    val Download: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        icon(
+            "Download",
+            "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z"
+        )
+    }
+
+    /**
+     * Logotipo de Google Drive con sus seis facetas (verde, verde oscuro,
+     * amarillo, naranja, azul y azul oscuro), trazado sobre un viewport de
+     * 512x512 a partir del diseño vectorial del logo. Va con Image, no con
+     * Icon: Icon fuerza un solo tinte y perdería los colores.
+     *
+     * Cada faceta lleva un contorno fino de su mismo color: tapa las
+     * líneas claras que el antialiasing deja entre formas contiguas.
+     */
+    val DriveLogo: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        fun ImageVector.Builder.facet(color: Long, path: String) = addPath(
+            pathData = addPathNodes(path),
+            fill = SolidColor(Color(color)),
+            stroke = SolidColor(Color(color)),
+            strokeLineWidth = 6f,
+            strokeLineJoin = StrokeJoin.Round
+        )
+        ImageVector.Builder(
+            name = "DriveLogo",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 512f,
+            viewportHeight = 512f
+        )
+            .facet(0xFF528EF9, "M83,478 L228,333 L512,333 L430,478 Z")          // azul
+            .facet(0xFF3A5ABD, "M83,478 L166,333 L228,333 Z")                    // azul oscuro
+            .facet(0xFF28B545, "M173,33 L0,332 L83,478 L166,333 L255,178 Z")     // verde
+            .facet(0xFF209B39, "M173,33 L255,178 L221,237 Z")                    // verde oscuro
+            .facet(0xFFFFD836, "M173,33 L340,33 L512,333 L345,333 Z")            // amarillo
+            .facet(0xFFF9BD00, "M324,295 L345,333 L512,333 Z")                   // naranja
+            .build()
+    }
 }
+
+/** Azul de marca de Drive, para acentos y fondos de tarjeta (no solo el logo). */
+val DriveBrandBlue = Color(0xFF2684FC)

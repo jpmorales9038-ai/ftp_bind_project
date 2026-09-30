@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
@@ -42,7 +44,7 @@ fun ServersScreen(vm: BindViewModel) {
     var newProfileType by remember { mutableStateOf(RemoteType.FTP) }
     var deleteTarget by remember { mutableStateOf<RemoteProfile?>(null) }
 
-    fun openNew(type: RemoteType) {
+    fun openNew(type: RemoteType = RemoteType.FTP) {
         editTarget = null
         newProfileType = type
         showSheet = true
@@ -57,23 +59,14 @@ fun ServersScreen(vm: BindViewModel) {
             onRefresh = { vm.pullRefresh() },
             maxContentWidth = if (dualPane) DualPaneContentWidth else null,
             actions = {
-                // Un solo botón para los dos tipos: el formulario ya deja
-                // elegir FTP o Google Drive con chips al crear uno nuevo, así
-                // que no hace falta un "+" por sección. Va en el mismo lugar
-                // que "Actualizar" en Logs, en vertical y en apaisado.
-                IconButton(onClick = { openNew(RemoteType.FTP) }) {
+                IconButton(onClick = { openNew() }) {
                     Icon(Icons.Default.Add, contentDescription = "Agregar servidor")
                 }
             }
         ) {
-            Text(
-                "Toca una tarjeta para elegir el servidor que se monta.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            val ftp = vm.profiles.filter { it.type == RemoteType.FTP }
-            val drive = vm.profiles.filter { it.type == RemoteType.DRIVE }
             if (dualPane) {
+                val ftp = vm.profiles.filter { it.type == RemoteType.FTP }
+                val drive = vm.profiles.filter { it.type == RemoteType.DRIVE }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(24.dp)
@@ -99,32 +92,29 @@ fun ServersScreen(vm: BindViewModel) {
                         onDelete = { deleteTarget = it }
                     )
                 }
+            } else if (vm.profiles.isEmpty()) {
+                Text(
+                    "Todavía no hay servidores guardados. Agrega un servidor FTP o tu Google Drive para montarlo como carpeta en tu almacenamiento.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FilledTonalButton(onClick = { openNew() }) { Text("Agregar servidor") }
             } else {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
-                ) {
-                    ServerPanel(
-                        modifier = Modifier.fillMaxWidth(),
-                        type = RemoteType.FTP,
-                        emptyHint = "Agrega un servidor FTP para montarlo como carpeta.",
-                        profiles = ftp,
-                        selected = vm.activeName,
-                        onSelect = { vm.selectProfile(it) },
-                        onEdit = { p -> editTarget = p; showSheet = true },
-                        onDelete = { deleteTarget = it }
-                    )
-                    ServerPanel(
-                        modifier = Modifier.fillMaxWidth(),
-                        type = RemoteType.DRIVE,
-                        emptyHint = "Conecta tu cuenta de Google Drive para montarla como carpeta.",
-                        profiles = drive,
-                        selected = vm.activeName,
-                        onSelect = { vm.selectProfile(it) },
-                        onEdit = { p -> editTarget = p; showSheet = true },
-                        onDelete = { deleteTarget = it }
-                    )
-                }
+                Text(
+                    "Toca una tarjeta para elegir el servidor que se monta.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ServerCardStack(
+                    profiles = vm.profiles,
+                    selected = vm.activeName,
+                    onSelect = { vm.selectProfile(it) },
+                    onEdit = { p ->
+                        editTarget = p
+                        showSheet = true
+                    },
+                    onDelete = { deleteTarget = it }
+                )
             }
         }
     }
@@ -174,11 +164,10 @@ fun ServersScreen(vm: BindViewModel) {
 }
 
 /**
- * Una sección por tipo de remoto (FTP o Google Drive): título y debajo su
- * stack de tarjetas (o un aviso si todavía no tiene ningún servidor
- * guardado). Agregar uno nuevo es un solo botón para los dos tipos, en el
- * encabezado de [ServersScreen]. En pantallas anchas las dos secciones van
- * en fila; en angostas, apiladas — [ServersScreen] decide el arreglo.
+ * Una columna del doble panel: título del tipo de remoto con su propio
+ * botón de agregar, y debajo su stack (o un aviso si todavía no tiene
+ * ningún servidor guardado). Solo se usa en pantallas anchas; en vertical
+ * los servidores de ambos tipos se ven mezclados en un único stack.
  */
 @Composable
 private fun ServerPanel(
