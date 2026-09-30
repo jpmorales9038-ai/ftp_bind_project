@@ -37,6 +37,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
 import com.rclonebind.app.ui.components.AppIcons
@@ -390,9 +392,14 @@ private fun PerfCard(
         // sentido en modo Máximo (en Equilibrado no se usa un tamaño
         // configurable), así que se oculta por completo en Equilibrado.
         if (vm.perfMode == PerfMode.MAX) {
+            val haptics = LocalHapticFeedback.current
             val custom = vm.cacheGb
             val effective = custom ?: defaultCacheGb(vm.perfMode)
             var draft by remember(effective) { mutableStateOf(effective.toFloat()) }
+            // SegmentTick en cada GB que cruza el dedo (no en cada píxel):
+            // el mismo háptico suave y discreto que ya usa la píldora de
+            // navegación, en vez del tic más fuerte por defecto del Slider.
+            var lastTick by remember(effective) { mutableStateOf(effective) }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -407,7 +414,14 @@ private fun PerfCard(
             }
             Slider(
                 value = draft,
-                onValueChange = { draft = it },
+                onValueChange = {
+                    draft = it
+                    val rounded = it.roundToInt()
+                    if (rounded != lastTick) {
+                        lastTick = rounded
+                        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    }
+                },
                 onValueChangeFinished = { vm.setCacheGb(draft.roundToInt()) },
                 valueRange = CACHE_GB_MIN.toFloat()..CACHE_GB_MAX.toFloat(),
                 steps = CACHE_GB_MAX - CACHE_GB_MIN - 1
