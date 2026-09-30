@@ -1,6 +1,7 @@
 package com.rclonebind.app.ui.screens
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,12 +41,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.BindViewModel
 import com.rclonebind.app.ui.components.AppIcons
 import com.rclonebind.app.root.CACHE_GB_MAX
 import com.rclonebind.app.root.CACHE_GB_MIN
 import com.rclonebind.app.root.PerfMode
+import com.rclonebind.app.root.RemoteType
 import com.rclonebind.app.root.defaultCacheGb
 import com.rclonebind.app.root.formatCacheKb
 import com.rclonebind.app.ui.components.DualPaneContentWidth
@@ -271,17 +275,45 @@ private fun MountCard(
                 modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.weight(1f)) {
-                    // v1.5.2: antes iba en titleLarge/bodyMedium, más grande
-                    // que el resto de las tarjetas. Se baja a titleMedium/
-                    // bodySmall para que quede al mismo tamaño que los
-                    // títulos y descripciones del apartado Rendimiento.
-                    Text(selected?.name ?: "Ninguno", style = MaterialTheme.typography.titleMedium)
-                    if (selected != null) {
+                // Mini icono del tipo de servidor: logo de Drive (con sus
+                // colores, por eso Image) o el icono de servidor para FTP.
+                if (selected != null) {
+                    if (selected.type == RemoteType.DRIVE) {
+                        Image(AppIcons.DriveLogo, contentDescription = null, modifier = Modifier.size(20.dp))
+                    } else {
+                        Icon(
+                            AppIcons.Dns,
+                            contentDescription = null,
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                }
+                // Mismo estilo que la carpeta de destino, centrado
+                // verticalmente. La línea secundaria (usuario@host) solo
+                // se dibuja si tiene texto: en Drive el host va vacío y
+                // un Text vacío igual ocupa una línea, lo que descentraba
+                // el nombre.
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                    Text(
+                        selected?.name ?: "Ninguno",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val detail = when {
+                        selected == null || selected.type == RemoteType.DRIVE -> ""
+                        selected.user.isEmpty() -> selected.host
+                        else -> "${selected.user}@${selected.host}"
+                    }
+                    if (detail.isNotBlank()) {
                         Text(
-                            if (selected.user.isEmpty()) selected.host else "${selected.user}@${selected.host}",
+                            detail,
                             style = MaterialTheme.typography.bodySmall,
-                            color = scheme.onSurfaceVariant
+                            color = scheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
