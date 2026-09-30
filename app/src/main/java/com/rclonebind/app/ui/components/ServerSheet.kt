@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
@@ -40,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -353,6 +355,12 @@ fun ServerSheet(
                     },
                     enabled = !loginRunning,
                     shape = MaterialTheme.shapes.large,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF4285F4), // Azul Google
+                        contentColor = Color.White,
+                        disabledContainerColor = Color(0xFF4285F4).copy(alpha = 0.38f),
+                        disabledContentColor = Color.White.copy(alpha = 0.6f)
+                    ),
                     modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
                     Text(if (hasSession) "Volver a iniciar sesión" else "Iniciar sesión con Google")
