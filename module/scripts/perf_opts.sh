@@ -112,6 +112,19 @@ compute_mount_opts() {
             ;;
     esac
 
+    # S3: en un bucket las carpetas no existen, solo son parte del nombre de los
+    # objetos, así que una carpeta vacía creada desde el explorador se perdía al
+    # desmontar. Con --s3-directory-markers rclone sube un objeto vacío
+    # "carpeta/" por cada carpeta nueva y la conserva. También permite montar
+    # una carpeta vacía del bucket. Requiere rclone 1.64+ (se quita si el
+    # binario es más viejo).
+    if [ "$(remote_type "$ACTIVE")" = s3 ]; then
+        if [ ! -x "$MODDIR/bin/rclone" ] || \
+           "$MODDIR/bin/rclone" mount --help 2>&1 | grep -q -- '--s3-directory-markers'; then
+            MOUNT_OPTS="$MOUNT_OPTS --s3-directory-markers"
+        fi
+    fi
+
     # --vfs-read-chunk-streams solo existe desde rclone 1.67: si el binario
     # incluido es más viejo se quita, en vez de que el montaje falle por una
     # opción desconocida. Mismo cálculo para mount.sh y perf_test.sh.
