@@ -41,6 +41,30 @@ remote_root() {
     remote_key "$1" bind_path
 }
 
+# Versión del binario incluido ("rclone v1.75.1" -> 1 75). Vacío si no se puede leer.
+rclone_version_parts() {
+    [ -x "$MODDIR/bin/rclone" ] || return 1
+    _v="$("$MODDIR/bin/rclone" version 2>/dev/null | head -n 1)"
+    _v="${_v#*v}"
+    _maj="${_v%%.*}"
+    _rest="${_v#*.}"
+    _min="${_rest%%.*}"
+    case "$_maj$_min" in ''|*[!0-9]*) return 1 ;; esac
+    [ -n "$_maj" ] && [ -n "$_min" ] || return 1
+    echo "$_maj $_min"
+}
+
+rclone_version_known() {
+    [ -n "$(rclone_version_parts)" ]
+}
+
+# rclone_at_least <mayor> <menor>: el binario es esa versión o una más nueva.
+rclone_at_least() {
+    set -- "$1" "$2" $(rclone_version_parts)
+    [ -n "$3" ] || return 1
+    [ "$3" -gt "$1" ] || { [ "$3" -eq "$1" ] && [ "$4" -ge "$2" ]; }
+}
+
 compute_mount_opts() {
     # Rendimiento elegido en la app (config/perf: "balanced" o "max") y tamaño
     # de caché en GB (config/cache_gb, opcional; vacío = el de cada perfil).
@@ -116,11 +140,16 @@ compute_mount_opts() {
     # objetos, así que una carpeta vacía creada desde el explorador se perdía al
     # desmontar. Con --s3-directory-markers rclone sube un objeto vacío
     # "carpeta/" por cada carpeta nueva y la conserva. También permite montar
-    # una carpeta vacía del bucket. Requiere rclone 1.64+ (se quita si el
-    # binario es más viejo).
+    # una carpeta vacía del bucket. Requiere rclone 1.64+.
+    #
+    # OJO: es una opción del backend S3, y "rclone mount --help" solo lista las
+    # opciones de montaje/VFS, no las de los backends; buscarla ahí daba siempre
+    # "no existe" y la opción se omitía sin avisar. Se decide por la versión del
+    # binario y, si no se puede leer, con "rclone help flags".
     if [ "$(remote_type "$ACTIVE")" = s3 ]; then
-        if [ ! -x "$MODDIR/bin/rclone" ] || \
-           "$MODDIR/bin/rclone" mount --help 2>&1 | grep -q -- '--s3-directory-markers'; then
+        if rclone_at_least 1 64 || \
+           { ! rclone_version_known && \
+             "$MODDIR/bin/rclone" help flags directory-markers 2>&1 | grep -q -- '--s3-directory-markers'; }; then
             MOUNT_OPTS="$MOUNT_OPTS --s3-directory-markers"
         fi
     fi
