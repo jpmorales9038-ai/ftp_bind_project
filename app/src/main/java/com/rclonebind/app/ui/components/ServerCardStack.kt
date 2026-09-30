@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RemoteType
+import com.rclonebind.app.root.subtitle
 import com.rclonebind.app.ui.theme.AppMotion
 
 // Parte visible de una tarjeta cerrada, y cuánto se mete bajo la siguiente
@@ -162,11 +163,7 @@ private fun StackCard(
                 )
             }
             Text(
-                text = when {
-                    profile.type == RemoteType.DRIVE -> RemoteType.DRIVE.label
-                    profile.user.isEmpty() -> profile.host
-                    else -> "${profile.user}@${profile.host}"
-                },
+                text = profile.subtitle,
                 style = MaterialTheme.typography.bodyMedium,
                 color = LocalContentColor.current.copy(alpha = 0.8f),
                 maxLines = 1,
@@ -183,6 +180,16 @@ private fun StackCard(
                         )
                         Text(
                             if (drive?.readOnly == true) "Solo lectura" else "Lectura y escritura",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    } else if (profile.type == RemoteType.S3) {
+                        val s3 = profile.s3
+                        Text(
+                            if (s3?.bucket.isNullOrEmpty()) "Todos los buckets" else "Bucket ${s3?.bucket}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            if (s3?.hasSecret == true) "Clave secreta guardada" else "Sin clave secreta",
                             style = MaterialTheme.typography.bodyMedium
                         )
                     } else {

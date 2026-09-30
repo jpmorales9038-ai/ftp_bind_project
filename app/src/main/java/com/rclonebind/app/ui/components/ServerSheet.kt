@@ -54,6 +54,15 @@ import com.rclonebind.app.root.DriveAuthState
 import com.rclonebind.app.root.DriveOptions
 import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RemoteType
+import com.rclonebind.app.root.S3Options
+import com.rclonebind.app.root.cleanS3Bucket
+import com.rclonebind.app.root.cleanS3Endpoint
+import com.rclonebind.app.root.oracleEndpoint
+import com.rclonebind.app.root.parseOracleEndpoint
+import com.rclonebind.app.root.validateOracleNamespace
+import com.rclonebind.app.root.validateOracleRegion
+import com.rclonebind.app.root.validateS3Bucket
+import com.rclonebind.app.root.validateS3Endpoint
 import com.rclonebind.app.root.cleanHost
 import com.rclonebind.app.root.extractDriveFolderId
 import com.rclonebind.app.root.normalizeToken
@@ -63,7 +72,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
- * Formulario para agregar un servidor (FTP o Google Drive), o editar
+ * Formulario para agregar un servidor (FTP, Google Drive o S3), o editar
  * [initial] si no es null. El tipo no se puede cambiar al editar.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -80,6 +89,7 @@ fun ServerSheet(
     onDriveCancel: () -> Unit,
     onSaveFtp: (name: String, host: String, port: String, user: String, pass: String) -> Unit,
     onSaveDrive: (name: String, token: String?, options: DriveOptions) -> Unit,
+    onSaveS3: (name: String, options: S3Options, secret: String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -113,6 +123,26 @@ fun ServerSheet(
     // Token nuevo (login o pegado). Null al editar = se conserva la sesión guardada.
     var newToken by remember { mutableStateOf<String?>(null) }
     var driveError by remember { mutableStateOf<String?>(null) }
+
+    // Estado de S3. Con Oracle Cloud basta namespace + región (el endpoint se
+    // arma solo); "Otro proveedor" deja escribir el endpoint completo.
+    val initialS3 = initial?.s3
+    val initialOracle = initialS3?.endpoint?.let { parseOracleEndpoint(it) }
+    var s3Oracle by remember { mutableStateOf(initialS3 == null || initialOracle != null) }
+    var s3Namespace by remember { mutableStateOf(initialOracle?.first.orEmpty()) }
+    var s3Region by remember { mutableStateOf(initialS3?.region.orEmpty()) }
+    var s3Endpoint by remember {
+        mutableStateOf(if (initialOracle == null) initialS3?.endpoint.orEmpty() else "")
+    }
+    var s3AccessKey by remember { mutableStateOf(initialS3?.accessKeyId.orEmpty()) }
+    var s3Secret by remember { mutableStateOf("") }
+    var s3Bucket by remember { mutableStateOf(initialS3?.bucket.orEmpty()) }
+    var s3NamespaceError by remember { mutableStateOf<String?>(null) }
+    var s3RegionError by remember { mutableStateOf<String?>(null) }
+    var s3EndpointError by remember { mutableStateOf<String?>(null) }
+    var s3AccessKeyError by remember { mutableStateOf<String?>(null) }
+    var s3SecretError by remember { mutableStateOf<String?>(null) }
+    var s3BucketError by remember { mutableStateOf<String?>(null) }
 
     // Cliente OAuth efectivo: el propio si se escribió; si no, el de la app. Un
     // remoto viejo creado con el cliente compartido de rclone (sin client_id
@@ -197,12 +227,16 @@ fun ServerSheet(
             if (initial == null) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     RemoteType.entries.forEach { option ->
                         OptionTile(
                             label = option.label,
-                            icon = if (option == RemoteType.FTP) AppIcons.Dns else AppIcons.DriveLogo,
+                            icon = when (option) {
+                                RemoteType.FTP -> AppIcons.Dns
+                                RemoteType.DRIVE -> AppIcons.DriveLogo
+                                RemoteType.S3 -> AppIcons.Cloud
+                            },
                             selected = type == option,
                             onClick = { type = option },
                             brandIcon = option == RemoteType.DRIVE,
@@ -327,6 +361,114 @@ fun ServerSheet(
                     } else null,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else if (type == RemoteType.S3) {
+                // ---- S3 / Oracle Cloud Object Storage ----
+                Text(
+                    if (s3Oracle) {
+                        "Oracle Cloud: usa una «Customer Secret Key» (Perfil > Mi perfil > " +
+                            "Claves secretas de cliente). El namespace está en Administración del inquilino."
+                    } else {
+                        "Cualquier servicio compatible con S3 (MinIO, Wasabi, Backblaze B2, Cloudflare R2...)."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = s3Oracle,
+                        onClick = { s3Oracle = true },
+                        label = { Text("Oracle Cloud") }
+                    )
+                    FilterChip(
+                        selected = !s3Oracle,
+                        onClick = { s3Oracle = false },
+                        label = { Text("Otro proveedor") }
+                    )
+                }
+                if (s3Oracle) {
+                    OutlinedTextField(
+                        value = s3Namespace,
+                        onValueChange = { s3Namespace = it.trim(); s3NamespaceError = null },
+                        label = { Text("Namespace") },
+                        singleLine = true,
+                        isError = s3NamespaceError != null,
+                        supportingText = s3NamespaceError?.let { { Text(it) } },
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = s3Region,
+                        onValueChange = { s3Region = it.trim(); s3RegionError = null },
+                        label = { Text("Región") },
+                        placeholder = { Text("us-ashburn-1") },
+                        singleLine = true,
+                        isError = s3RegionError != null,
+                        supportingText = s3RegionError?.let { { Text(it) } },
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = s3Endpoint,
+                        onValueChange = { s3Endpoint = it; s3EndpointError = null },
+                        label = { Text("Endpoint") },
+                        placeholder = { Text("https://s3.ejemplo.com") },
+                        singleLine = true,
+                        isError = s3EndpointError != null,
+                        supportingText = s3EndpointError?.let { { Text(it) } },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = s3Region,
+                        onValueChange = { s3Region = it.trim() },
+                        label = { Text("Región (opcional)") },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                OutlinedTextField(
+                    value = s3AccessKey,
+                    onValueChange = { s3AccessKey = it.trim(); s3AccessKeyError = null },
+                    label = { Text("Access Key ID") },
+                    singleLine = true,
+                    isError = s3AccessKeyError != null,
+                    supportingText = s3AccessKeyError?.let { { Text(it) } },
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                val secretHint = s3SecretError
+                    ?: if (initialS3?.hasSecret == true) "Déjala vacía para conservar la actual" else null
+                OutlinedTextField(
+                    value = s3Secret,
+                    onValueChange = { s3Secret = it; s3SecretError = null },
+                    label = { Text("Secret Access Key") },
+                    singleLine = true,
+                    isError = s3SecretError != null,
+                    supportingText = secretHint?.let { { Text(it) } },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = s3Bucket,
+                    onValueChange = { s3Bucket = cleanS3Bucket(it); s3BucketError = null },
+                    label = { Text("Bucket (opcional)") },
+                    isError = s3BucketError != null,
+                    supportingText = {
+                        Text(
+                            s3BucketError
+                                ?: "Se monta ese bucket (o «bucket/carpeta»). Vacío muestra todos los buckets; " +
+                                    "si tu clave no puede listarlos, escribe el bucket."
+                        )
+                    },
+                    singleLine = true,
                     shape = MaterialTheme.shapes.large,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -522,6 +664,42 @@ fun ServerSheet(
                         portError = if (portNumber == null || portNumber !in 1..65535) "Usa un puerto entre 1 y 65535" else null
                         if (nameError == null && hostError == null && portError == null) {
                             onSaveFtp(cleanName, host, port, user, pass)
+                        }
+                    } else if (type == RemoteType.S3) {
+                        val endpoint: String
+                        val region: String
+                        if (s3Oracle) {
+                            s3NamespaceError = validateOracleNamespace(s3Namespace.trim())
+                            s3RegionError = validateOracleRegion(s3Region.trim())
+                            endpoint = oracleEndpoint(s3Namespace, s3Region)
+                            region = s3Region.trim()
+                            s3EndpointError = null
+                        } else {
+                            endpoint = cleanS3Endpoint(s3Endpoint)
+                            region = s3Region.trim()
+                            s3EndpointError = validateS3Endpoint(endpoint)
+                            s3NamespaceError = null
+                            s3RegionError = null
+                        }
+                        s3AccessKeyError = if (s3AccessKey.isBlank()) "Escribe la clave de acceso" else null
+                        s3SecretError = if (s3Secret.isEmpty() && initialS3?.hasSecret != true) {
+                            "Escribe la clave secreta"
+                        } else null
+                        s3BucketError = validateS3Bucket(s3Bucket)
+                        if (nameError == null && s3NamespaceError == null && s3RegionError == null &&
+                            s3EndpointError == null && s3AccessKeyError == null &&
+                            s3SecretError == null && s3BucketError == null
+                        ) {
+                            onSaveS3(
+                                cleanName,
+                                S3Options(
+                                    endpoint = endpoint,
+                                    region = region,
+                                    accessKeyId = s3AccessKey.trim(),
+                                    bucket = s3Bucket
+                                ),
+                                s3Secret
+                            )
                         }
                     } else {
                         driveError = when {

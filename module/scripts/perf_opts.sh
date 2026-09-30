@@ -7,25 +7,38 @@
 #   . "$MODDIR/scripts/perf_opts.sh"
 #   compute_mount_opts      # deja el resultado en $MOUNT_OPTS (y $PERF)
 
-# Tipo del remoto (ftp, drive...): lee la clave "type" de su sección. Se hace
-# con "case" y no con sed para no depender de caracteres especiales en el
-# nombre.
-remote_type() {
+# Valor de una clave de la sección de un remoto en rclone.conf (o nada si no
+# está). Se hace con "case" y no con sed para no depender de caracteres
+# especiales en el nombre. Uso: remote_key <remoto> <clave>
+remote_key() {
     in_section=0
     while IFS= read -r line; do
         case "$line" in
             "[$1]") in_section=1 ;;
             "["*"]") in_section=0 ;;
-            "type "*"="*|"type="*)
+            "$2 "*"="*|"$2="*)
                 if [ "$in_section" = 1 ]; then
                     v="${line#*=}"
                     v="${v# }"
-                    echo "${v%% *}"
+                    echo "$v"
                     return
                 fi
                 ;;
         esac
     done < "$RCLONE_CONF"
+}
+
+# Tipo del remoto (ftp, drive, s3...): la clave "type" de su sección.
+remote_type() {
+    v="$(remote_key "$1" type)"
+    echo "${v%% *}"
+}
+
+# Carpeta dentro del remoto que se monta (clave "bind_path" que escribe la
+# app; en S3 es el bucket, con subcarpeta opcional). Vacía = la raíz del
+# remoto. rclone ignora las claves que no conoce, así que no le afecta.
+remote_root() {
+    remote_key "$1" bind_path
 }
 
 compute_mount_opts() {

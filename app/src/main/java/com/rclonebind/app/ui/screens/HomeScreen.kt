@@ -49,6 +49,7 @@ import com.rclonebind.app.root.CACHE_GB_MAX
 import com.rclonebind.app.root.CACHE_GB_MIN
 import com.rclonebind.app.root.PerfMode
 import com.rclonebind.app.root.RemoteType
+import com.rclonebind.app.root.subtitle
 import com.rclonebind.app.root.defaultCacheGb
 import com.rclonebind.app.root.formatCacheKb
 import com.rclonebind.app.ui.components.DualPaneContentWidth
@@ -282,7 +283,7 @@ private fun MountCard(
                         Image(AppIcons.DriveLogo, contentDescription = null, modifier = Modifier.size(20.dp))
                     } else {
                         Icon(
-                            AppIcons.Dns,
+                            if (selected.type == RemoteType.S3) AppIcons.Cloud else AppIcons.Dns,
                             contentDescription = null,
                             tint = scheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)
@@ -304,8 +305,7 @@ private fun MountCard(
                     )
                     val detail = when {
                         selected == null || selected.type == RemoteType.DRIVE -> ""
-                        selected.user.isEmpty() -> selected.host
-                        else -> "${selected.user}@${selected.host}"
+                        else -> selected.subtitle
                     }
                     if (detail.isNotBlank()) {
                         Text(
