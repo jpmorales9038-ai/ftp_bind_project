@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="RClone FTP Bind" width="100%">
+  <img src="docs/banner.svg" alt="RClone FTP Bind: FTP, Google Drive y S3 como carpetas en Android. Oracle Cloud, Amazon S3, Cloudflare R2 y compatibles. Requiere KernelSU." width="100%">
 </p>
 
 <p align="center">
