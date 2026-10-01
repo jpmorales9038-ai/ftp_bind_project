@@ -106,6 +106,76 @@ enum class S3Provider(val label: String, private val hostSuffixes: List<String>)
 val RemoteProfile.s3Provider: S3Provider?
     get() = s3?.let { S3Provider.fromEndpoint(it.endpoint) }
 
+/**
+ * Ajustes de rendimiento propios de S3 (Oracle Cloud y compatibles), cada uno
+ * en su archivo de config/ (los lee scripts/perf_opts.sh al montar). Un valor
+ * null significa "automático": el que corresponde al proveedor y al perfil
+ * (ver [S3Perf]).
+ */
+data class S3PerfSettings(
+    /** Trozos del mismo archivo que se leen a la vez (--vfs-read-chunk-streams). Solo en Máximo. */
+    val streams: Int? = null,
+    /** Partes de una subida multiparte a la vez (--s3-upload-concurrency). Solo en Máximo. */
+    val uploadConcurrency: Int? = null,
+    /** Tamaño de cada parte de subida en MB (--s3-chunk-size). Solo en Máximo. */
+    val chunkMb: Int? = null,
+    /** Evita peticiones HEAD y copias en el servidor (ver perf_opts.sh). */
+    val fewerRequests: Boolean? = null,
+    /** Minutos que se cachea cada listado de carpeta (--dir-cache-time). */
+    val dirCacheMin: Int? = null
+) {
+    val isCustom: Boolean
+        get() = streams != null || uploadConcurrency != null || chunkMb != null ||
+            fewerRequests != null || dirCacheMin != null
+}
+
+/**
+ * Rangos y valores automáticos del rendimiento de S3. Los automáticos deben
+ * coincidir con los de scripts/perf_opts.sh (s3_mount_opts).
+ */
+object S3Perf {
+    const val STREAMS_MIN = 1
+    const val STREAMS_MAX = 12
+    const val STREAMS_DEFAULT = 6
+
+    const val UPLOAD_CONC_MIN = 1
+    const val UPLOAD_CONC_MAX = 16
+    const val UPLOAD_CONC_DEFAULT = 6
+
+    val CHUNK_CHOICES_MB = listOf(8, 16, 32, 64)
+    const val CHUNK_DEFAULT_MB = 16
+
+    val DIR_CACHE_CHOICES_MIN = listOf(5, 10, 30, 60, 360)
+
+    /** --transfers que fija el perfil Máximo para S3. */
+    const val TRANSFERS = 4
+
+    /** Tope de RAM de subida: el script baja las partes simultáneas para no pasarlo. */
+    const val UPLOAD_RAM_CAP_MB = 768
+
+    /** Oracle factura y limita por peticiones según el plan: recorta por defecto. */
+    fun defaultFewerRequests(provider: S3Provider): Boolean = provider == S3Provider.ORACLE
+
+    fun defaultDirCacheMin(provider: S3Provider, mode: PerfMode): Int = when {
+        provider == S3Provider.ORACLE -> 30
+        mode == PerfMode.MAX -> 10
+        else -> 5
+    }
+
+    /** Partes simultáneas que realmente se usan: las pedidas, bajadas hasta entrar en el tope de RAM. */
+    fun effectiveUploadConcurrency(requested: Int, chunkMb: Int): Int {
+        var c = requested
+        while (c > 1 && TRANSFERS * c * chunkMb > UPLOAD_RAM_CAP_MB) c--
+        return c
+    }
+
+    /** RAM de subida en el peor caso (MB): transfers x partes simultáneas x tamaño de parte. */
+    fun uploadRamMb(concurrency: Int, chunkMb: Int): Int = TRANSFERS * concurrency * chunkMb
+}
+
+/** "5 min", "1 h", "6 h". */
+fun formatMinutes(min: Int): String = if (min < 60) "$min min" else "${min / 60} h"
+
 /** Línea corta que identifica el servidor en tarjetas y en Inicio. */
 val RemoteProfile.subtitle: String
     get() = when (type) {

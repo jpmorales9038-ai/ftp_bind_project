@@ -10,7 +10,9 @@ import com.rclonebind.app.root.DEFAULT_TARGET_PATH
 import com.rclonebind.app.root.DriveAuthParser
 import com.rclonebind.app.root.DriveAuthState
 import com.rclonebind.app.root.DriveOptions
+import com.rclonebind.app.root.ModulePaths
 import com.rclonebind.app.root.S3Options
+import com.rclonebind.app.root.S3PerfSettings
 import com.rclonebind.app.root.PerfMode
 import com.rclonebind.app.root.PerfTestParser
 import com.rclonebind.app.root.PerfTestState
@@ -41,6 +43,7 @@ private class Snapshot(
     val cacheGb: Int?,
     val cacheKb: Long,
     val ramCache: Boolean,
+    val s3Perf: S3PerfSettings,
     val preloadRaw: String
 )
 
@@ -85,6 +88,8 @@ class BindViewModel : ViewModel() {
     /** Prueba de rendimiento: la muestra PerfTestSheet. */
     /** Caché en RAM del perfil Máximo (config/ram_cache); mount.sh decide si hay memoria para cumplirlo. */
     var ramCache by mutableStateOf(false)
+    /** Ajustes de rendimiento de S3; null en cada campo = automático. */
+    var s3Perf by mutableStateOf(S3PerfSettings())
         private set
     var perfTest by mutableStateOf(PerfTestState())
         private set
@@ -138,6 +143,7 @@ class BindViewModel : ViewModel() {
                 cacheGb = RootShell.readCacheGb(),
                 cacheKb = RootShell.cacheSizeKb(),
                 ramCache = RootShell.readRamCache(),
+                s3Perf = RootShell.readS3Perf(),
                 preloadRaw = RootShell.preloadStatus()
             )
         }
@@ -160,6 +166,7 @@ class BindViewModel : ViewModel() {
         cacheGb = snap.cacheGb
         cacheKb = snap.cacheKb
         ramCache = snap.ramCache
+        s3Perf = snap.s3Perf
         isMounted = snap.status.contains("\"mounted\":true")
         mountedRemote = if (isMounted) {
             Regex("\"remote\":\"([^\"]*)\"").find(snap.status)?.groupValues?.get(1)
@@ -569,6 +576,41 @@ class BindViewModel : ViewModel() {
             isMounted -> "Guardado. Vuelve a montar para aplicarlo."
             else -> null
         }
+    }
+
+    // ---- Rendimiento de S3: cada setter guarda su archivo y pide volver a montar ----
+
+    fun setS3Streams(value: Int?) = saveS3Perf(ModulePaths.S3_STREAMS, value) { it.copy(streams = value) }
+
+    fun setS3UploadConcurrency(value: Int?) =
+        saveS3Perf(ModulePaths.S3_UPLOAD_CONC, value) { it.copy(uploadConcurrency = value) }
+
+    fun setS3ChunkMb(value: Int?) = saveS3Perf(ModulePaths.S3_CHUNK_MB, value) { it.copy(chunkMb = value) }
+
+    fun setS3FewerRequests(value: Boolean?) =
+        saveS3Perf(ModulePaths.S3_FEWER_REQ, value?.let { if (it) 1 else 0 }) { it.copy(fewerRequests = value) }
+
+    fun setS3DirCacheMin(value: Int?) =
+        saveS3Perf(ModulePaths.S3_DIR_CACHE_MIN, value) { it.copy(dirCacheMin = value) }
+
+    /** Vuelve todos los ajustes de S3 a automático. */
+    fun resetS3Perf() = viewModelScope.launch {
+        s3Perf = S3PerfSettings()
+        val result = withContext(Dispatchers.IO) { RootShell.resetS3Perf() }
+        message = perfSaveMessage(result)
+    }
+
+    private fun saveS3Perf(file: String, value: Int?, update: (S3PerfSettings) -> S3PerfSettings) =
+        viewModelScope.launch {
+            s3Perf = update(s3Perf)
+            val result = withContext(Dispatchers.IO) { RootShell.setS3PerfValue(file, value) }
+            message = perfSaveMessage(result)
+        }
+
+    private fun perfSaveMessage(result: RootShell.Result): String? = when {
+        !result.success -> "Error al guardar: ${result.output.take(200)}"
+        isMounted -> "Guardado. Vuelve a montar para aplicarlo."
+        else -> null
     }
 
     fun setAutostart(enabled: Boolean) = viewModelScope.launch {
