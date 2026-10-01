@@ -40,7 +40,8 @@ fi
 # "remote", el nombre que usaban las versiones con un solo servidor.
 ACTIVE="$(cat "$MODDIR/config/active" 2>/dev/null)"
 [ -z "$ACTIVE" ] && ACTIVE="remote"
-if ! grep -qxF "[$ACTIVE]" "$RCLONE_CONF"; then
+. "$MODDIR/scripts/perf_opts.sh"
+if [ -z "$(remote_type "$ACTIVE")" ]; then
     echo "$(date): No existe el servidor '$ACTIVE' en rclone.conf" >> "$LOG_FILE"
     exit 1
 fi
@@ -48,7 +49,6 @@ fi
 # Opciones de montaje según el perfil de rendimiento y el tipo de remoto
 # (scripts/perf_opts.sh; scripts/perf_test.sh usa el mismo cálculo para
 # comprobar que el montaje activo las tiene aplicadas).
-. "$MODDIR/scripts/perf_opts.sh"
 compute_mount_opts
 
 # Caché en RAM (tmpfs) del perfil Máximo: opcional, la activa el usuario
@@ -60,10 +60,14 @@ compute_mount_opts
 # así perf_test.sh puede saberlo con una simple lectura de /proc/mounts.
 RAM_CACHE_DIR="$MODDIR/cache_ram"
 if [ "$PERF" = max ] && [ "$(cat "$MODDIR/config/ram_cache" 2>/dev/null)" = "1" ]; then
-    NEED_MB=$(( ${CACHE_GB:-10} * 1024 + 256 ))
     AVAIL_KB="$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null)"
     case "$AVAIL_KB" in ''|*[!0-9]*) AVAIL_KB=0 ;; esac
     AVAIL_MB=$(( AVAIL_KB / 1024 ))
+    # tmpfs incluye el margen VFS de 2G. Dejar además al menos 1G o
+    # el 25% de MemAvailable para el juego, Android y buffers de rclone.
+    RESERVE_MB=$(( AVAIL_MB / 4 ))
+    [ "$RESERVE_MB" -ge 1024 ] || RESERVE_MB=1024
+    NEED_MB=$(( (${CACHE_GB:-10} + 2) * 1024 + RESERVE_MB ))
     if [ "$AVAIL_MB" -ge "$NEED_MB" ]; then
         mkdir -p "$RAM_CACHE_DIR"
         if ! grep -q " $RAM_CACHE_DIR tmpfs" /proc/mounts; then

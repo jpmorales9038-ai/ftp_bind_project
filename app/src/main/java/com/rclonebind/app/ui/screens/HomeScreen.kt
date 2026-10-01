@@ -204,10 +204,11 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
             text = {
                 Text(
                     "La caché del perfil Máximo se guardará en la memoria RAM del " +
-                        "teléfono en vez del almacenamiento interno: lecturas y escrituras " +
-                        "mucho más rápidas mientras esté montado. Ocupa esa RAM todo el " +
+                        "teléfono en vez del almacenamiento interno: puede acelerar lecturas " +
+                        "ya cacheadas, pero no la red. Consume RAM según se llena durante el " +
                         "tiempo que dure el montaje y su contenido se pierde al desmontar " +
-                        "o reiniciar (se reconstruye solo, como cualquier caché). Si al " +
+                        "o reiniciar. IMPORTANTE: las escrituras pendientes de subir pueden " +
+                        "perderse si se reinicia o se corta la alimentación. Si al " +
                         "montar no hay memoria suficiente, se usa el almacenamiento interno " +
                         "sin más aviso que una línea en Logs."
                 )
@@ -470,7 +471,7 @@ private fun PerfCard(
                 steps = CACHE_GB_MAX - CACHE_GB_MIN - 1
             )
             Text(
-                "Aplica a Google Drive, S3 y FTP en modo Máximo. En Máximo se dejan 2 GB libres para no llenar el almacenamiento.",
+                "Aplica a Google Drive, S3 y FTP en modo Máximo. Se intenta mantener 2 GB libres; los archivos abiertos y las subidas pendientes pueden superar el límite de caché.",
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant
             )

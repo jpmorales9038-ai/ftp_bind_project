@@ -17,7 +17,8 @@ enum class PerfMode(val id: String, val label: String) {
 /**
  * Rango del tamaño de caché en GB que ofrece la app. El tope real de lo que
  * cabe en el teléfono no es este número: es el espacio libre real, que
- * mount.sh siempre respeta dejando 2 GB de margen (--vfs-cache-min-free-space)
+ * rclone intenta conservar con 2 GB de margen (--vfs-cache-min-free-space);
+ * no es un límite duro para archivos abiertos o subidas pendientes
  * y que "Probar rendimiento" avisa si no alcanza. 100 GB es el tope que
  * ofrece el slider.
  */
@@ -138,11 +139,11 @@ data class S3PerfSettings(
 object S3Perf {
     const val STREAMS_MIN = 1
     const val STREAMS_MAX = 12
-    const val STREAMS_DEFAULT = 6
+    const val STREAMS_DEFAULT = 4
 
     const val UPLOAD_CONC_MIN = 1
     const val UPLOAD_CONC_MAX = 16
-    const val UPLOAD_CONC_DEFAULT = 6
+    const val UPLOAD_CONC_DEFAULT = 4
 
     val CHUNK_CHOICES_MB = listOf(8, 16, 32, 64)
     const val CHUNK_DEFAULT_MB = 16
@@ -152,8 +153,8 @@ object S3Perf {
     /** --transfers que fija el perfil Máximo para S3. */
     const val TRANSFERS = 4
 
-    /** Tope de RAM de subida: el script baja las partes simultáneas para no pasarlo. */
-    const val UPLOAD_RAM_CAP_MB = 768
+    /** Presupuesto estimado de buffers multiparte, no límite de RAM total. */
+    const val UPLOAD_RAM_CAP_MB = 256
 
     /** Oracle y Cloudflare R2 facturan por número de peticiones (R2 tras un cupo gratis): recortan por defecto. */
     fun defaultFewerRequests(provider: S3Provider): Boolean =
@@ -179,12 +180,16 @@ object S3Perf {
         return c
     }
 
-    /** RAM de subida en el peor caso (MB): transfers x partes simultáneas x tamaño de parte. */
+    /** Estimación de buffers multiparte (MB), sin incluir lecturas ni el resto del proceso. */
     fun uploadRamMb(concurrency: Int, chunkMb: Int): Int = TRANSFERS * concurrency * chunkMb
 }
 
 /** "5 min", "1 h", "6 h". */
-fun formatMinutes(min: Int): String = if (min < 60) "$min min" else "${min / 60} h"
+fun formatMinutes(min: Int): String = when {
+    min < 60 -> "$min min"
+    min % 60 == 0 -> "${min / 60} h"
+    else -> "${min / 60} h ${min % 60} min"
+}
 
 /** Línea corta que identifica el servidor en tarjetas y en Inicio. */
 val RemoteProfile.subtitle: String

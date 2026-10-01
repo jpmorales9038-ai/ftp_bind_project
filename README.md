@@ -89,7 +89,7 @@ sequenceDiagram
 - **Rendimiento de S3 / Oracle:** al elegir un servidor S3, la tarjeta **Rendimiento** de Inicio suma sus propias opciones (`S3PerfSection`; se aplican al volver a montar; cada una puede quedar en automático):
   - **Menos peticiones** (automático: sí en Oracle y Cloudflare R2, no en otros): `--use-server-modtime`, `--s3-no-head` y `--s3-no-head-object`. Evita un HEAD por archivo para leer su fecha (clave al listar o precargar miles de archivos) y las copias en el servidor que hacía rclone tras cada subida. Contrapartida: la fecha de modificación pasa a ser la de subida.
   - **Listados en caché** (5 min a 6 h; automático: 30 min en Oracle y R2, 10 min en Máximo y 5 min en Equilibrado para los demás): S3 no avisa de cambios hechos fuera del montaje, así que es lo que tarda en verse un archivo subido por otra vía.
-  - Solo en **Máximo**: **lectura paralela** (1 a 12 trozos del mismo archivo, `--vfs-read-chunk-streams`, 6 por defecto), **subida paralela** (1 a 16 partes, `--s3-upload-concurrency`, 6 por defecto; 3 en Cloudflare R2) y **tamaño de parte** (8, 16, 32 o 64 MB, `--s3-chunk-size`, 16 por defecto). La RAM de subida en el peor caso es 4 transferencias × partes × tamaño; si pasa de 768 MB, el script baja las partes simultáneas y la tarjeta lo avisa. Con *menos peticiones* desactivado, los archivos de más de una parte se suben en paralelo (`--s3-upload-cutoff`); activado, suben de una vez hasta 200 MB.
+  - Solo en **Máximo**: **lectura paralela** (1 a 12 trozos del mismo archivo, `--vfs-read-chunk-streams`, 4 por defecto), **subida paralela** (1 a 16 partes, `--s3-upload-concurrency`, 4 por defecto; 3 en Cloudflare R2) y **tamaño de parte** (8, 16, 32 o 64 MB, `--s3-chunk-size`, 14 por defecto). La RAM de subida en el peor caso es 4 transferencias × partes × tamaño; si pasa de 256 MB, el script baja las partes simultáneas y la tarjeta lo avisa. Con *menos peticiones* desactivado, los archivos de más de una parte se suben en paralelo (`--s3-upload-cutoff`); activado, suben de una vez hasta 200 MB.
   - Las opciones del backend se añaden solo si el binario de rclone las conoce (`rclone help flags`). Los ajustes viven en `config/s3_*` y el cálculo está en `scripts/perf_opts.sh` (`s3_mount_opts`), compartido con la prueba de rendimiento.
 - El bucket se guarda en la clave propia `bind_path` de la sección; rclone la ignora y la leen `mount.sh` y `check_remote.sh`.
 
@@ -126,9 +126,10 @@ sequenceDiagram
 - Un **vigilante** restaura el bind si Android o alguna app lo quita.
 - Cambiar de servidor con uno ya montado se hace con un solo botón.
 - Caché de disco acotada para Drive.
-- **Rendimiento** Equilibrado o Máximo: el modo Máximo usa caché completa también en FTP, lectura anticipada, descargas en paralelo y listados cacheados más tiempo. Además: en Drive se leen varios trozos del mismo archivo en paralelo (`--vfs-read-chunk-streams`, rclone 1.67+; se omite solo si el binario es más viejo) y se sube el ritmo de llamadas a la API (`--drive-pacer-*`), el doble de transferencias/verificaciones a la vez, las escrituras seguidas a un mismo archivo se agrupan antes de subir (`--vfs-write-back 15s`) y los listados usan un fingerprint más barato (`--vfs-fast-fingerprint`). El **tamaño de caché** es configurable (1 a 100 GB) y se dejan 2 GB libres.
-  Con **caché en RAM** (tmpfs, opcional, solo en Máximo) las lecturas y escrituras ya cacheadas van a velocidad de RAM en vez de disco. Se pide confirmación antes de activarla: ocupa esa RAM mientras esté montado y se pierde al desmontar o reiniciar. `mount.sh` comprueba la RAM libre antes de montar el tmpfs; si no alcanza, sigue en disco y lo deja en Logs.
-  **Precarga automática** (`scripts/preload.sh`): tras montar, si el perfil activo cachea lecturas completas (Máximo, o Drive en cualquier perfil), baja en segundo plano los archivos del remoto a la caché, respetando el tamaño configurado (deja 512 MB de margen) y con topes de tiempo por seguridad; el tope de cantidad de archivos por corrida es configurable (`config/preload_max_files`, 20000 por defecto) para no truncar en silencio remotos con miles de archivos sueltos. Así una app que abra esos archivos los encuentra ya locales en vez de esperar la descarga en ese momento. Queda registrada en Logs, y su progreso en vivo (archivos y MB) se puede seguir desde la tarjeta **Precarga de archivos** en Inicio (perfil Máximo), que también permite relanzarla a mano tras agregar contenido nuevo al remoto. Si el remoto tiene más contenido que el que se quiere precargar, conviene usar la carpeta raíz del servidor Drive para acotarlo.
+- **Rendimiento** Equilibrado o Máximo: Máximo usa caché completa en FTP, Drive y S3, lectura anticipada de 64 MB y buffers de 16 MB por archivo. Drive y S3 usan por defecto 4 streams de lectura de 16 MB si el binario admite `--vfs-read-chunk-streams`. Las subidas se mantienen en 4 transferencias y 8 verificadores; Drive usa partes de 16 MB. Solo se acelera el pacer si hay `client_id` propio; con el cliente compartido se conservan los valores de rclone. Se agrupan escrituras durante 15 s y los atributos se cachean 1 min. No se fuerza `--vfs-fast-fingerprint`, para no sacrificar detección de cambios externos.
+  **Caché**: Máximo permite 1–100 GB (10 por defecto); Equilibrado usa 1 GB e ignora cualquier tamaño personalizado residual. Todos los perfiles intentan conservar 2 GB libres. Los límites de VFS son blandos: archivos abiertos y subidas pendientes pueden superarlos. FTP Equilibrado cachea escrituras, no lecturas.
+  **Caché en RAM**: tmpfs opcional solo en Máximo. Se comprueba el tamaño elegido + 2 GB de margen VFS + una reserva para el sistema de al menos 1 GB o el 25% de MemAvailable. No se reserva físicamente toda esa RAM al montar, se consume según se llena. Si no alcanza, se usa disco y queda registrado en Logs. No acelera la red; el contenido se pierde al desmontar/reiniciar y las escrituras pendientes pueden perderse ante un corte o reinicio.
+  **Precarga automática** (`scripts/preload.sh`): solo en Máximo. Descarga en segundo plano hasta el presupuesto configurado menos 512 MB, con límites de tiempo. `config/preload_max_files` permite cambiar el máximo de archivos (20000 por defecto). El progreso aparece en Inicio y se puede relanzar manualmente. Los ajustes de rendimiento S3 son globales, no por servidor, y se aplican al volver a montar.
   El botón **Probar rendimiento** abre una hoja con la prueba (`scripts/perf_test.sh`, con root): comprueba
   que las opciones con las que corre rclone son las de la configuración actual (avisa si cambiaste el perfil o la
   caché sin volver a montar), que hay espacio para la caché, que el listado funciona, y mide escritura y lectura
@@ -173,3 +174,22 @@ sequenceDiagram
 <p align="center">
   <sub>Usa <a href="https://rclone.org">rclone</a> (MIT), <a href="https://github.com/topjohnwu/libsu">libsu</a> (Apache 2.0) y <a href="https://github.com/chrisbanes/haze">Haze</a> (Apache 2.0).</sub>
 </p>
+
+
+## Desarrollo y validación (1.9.8)
+
+Este ZIP es código fuente, **no un módulo flasheable ni un APK compilado**.
+El archivo de origen no incluía Gradle Wrapper, workflows ni los binarios de rclone/fusermount3.
+Se añade CI que ejecuta pruebas sin dependencias y compila un APK debug con Gradle 8.13 y JDK 17.
+No publica releases ni empaqueta un módulo incompleto. El primer build requiere acceso a los repositorios de dependencias.
+
+```sh
+python3 -m unittest discover -s tests -v
+# Con Gradle 8.13, JDK 17 y Android SDK (API 36):
+gradle --no-daemon :app:assembleDebug
+```
+
+La clave `debug.keystore` ya venía en el proyecto y se conserva para mantener compatibilidad de firma debug.
+**Es pública: no usarla como firma de producción.** Para producción usa una clave privada propia fuera del repositorio.
+Los cambios conservan los archivos de configuración; para aplicarlos hay que actualizar app y scripts del módulo, desmontar y volver a montar.
+Ver `CHANGELOG.md` y `VALIDATION.md` para el alcance y las limitaciones de estas comprobaciones.

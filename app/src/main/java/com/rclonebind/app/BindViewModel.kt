@@ -30,6 +30,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -48,6 +50,8 @@ private class Snapshot(
 )
 
 class BindViewModel : ViewModel() {
+
+    private val perfSaveMutex = Mutex()
 
     var isMounted by mutableStateOf(false)
         private set
@@ -88,6 +92,7 @@ class BindViewModel : ViewModel() {
     /** Prueba de rendimiento: la muestra PerfTestSheet. */
     /** Caché en RAM del perfil Máximo (config/ram_cache); mount.sh decide si hay memoria para cumplirlo. */
     var ramCache by mutableStateOf(false)
+        private set
     /** Ajustes de rendimiento de S3; null en cada campo = automático. */
     var s3Perf by mutableStateOf(S3PerfSettings())
         private set
@@ -529,85 +534,43 @@ class BindViewModel : ViewModel() {
         }
     }
 
-    fun setPerfMode(mode: PerfMode) = viewModelScope.launch {
-        perfMode = mode
-        val result = withContext(Dispatchers.IO) {
-            val r = RootShell.setPerfMode(mode)
-            // v1.5.3: el tamaño de caché personalizado ahora solo se puede
-            // elegir en Máximo (el control ya no se muestra en Equilibrado).
-            // Al volver a Equilibrado se borra el ajuste guardado para que no
-            // quede un valor de una sesión anterior en Máximo aplicándose sin
-            // que se vea en ningún lado; setCacheGb(null) hace que se use el
-            // tamaño fijo del perfil (1G, ver defaultCacheGb).
-            if (mode == PerfMode.BALANCED) {
-                val cacheReset = RootShell.setCacheGb(null)
-                if (r.success) cacheReset else r
-            } else {
-                r
-            }
-        }
-        if (mode == PerfMode.BALANCED) cacheGb = null
-        message = when {
-            !result.success -> "Error al guardar: ${result.output.take(200)}"
-            isMounted -> "Guardado. Vuelve a montar para aplicarlo."
-            else -> null
-        }
-    }
+    fun setPerfMode(mode: PerfMode) = savePerf({ RootShell.setPerfMode(mode) })
 
-    /** [gb] null restablece el tamaño del perfil. */
-    fun setCacheGb(gb: Int?) = viewModelScope.launch {
-        cacheGb = gb
-        val result = withContext(Dispatchers.IO) { RootShell.setCacheGb(gb) }
-        message = when {
-            !result.success -> "Error al guardar: ${result.output.take(200)}"
-            isMounted -> "Guardado. Vuelve a montar para aplicarlo."
-            else -> null
-        }
-    }
+    /** null restablece el tamaño del perfil. */
+    fun setCacheGb(gb: Int?) = savePerf({ RootShell.setCacheGb(gb) })
 
-    /**
-     * Caché en RAM del perfil Máximo. La app solo guarda si el usuario la
-     * pidió; mount.sh comprueba la memoria libre y decide de verdad al
-     * montar (si no alcanza, sigue en disco y lo deja en Logs).
-     */
-    fun setRamCache(enabled: Boolean) = viewModelScope.launch {
-        ramCache = enabled
-        val result = withContext(Dispatchers.IO) { RootShell.setRamCache(enabled) }
-        message = when {
-            !result.success -> "Error al guardar: ${result.output.take(200)}"
-            isMounted -> "Guardado. Vuelve a montar para aplicarlo."
-            else -> null
-        }
-    }
+    /** mount.sh comprueba la memoria disponible antes de activar tmpfs. */
+    fun setRamCache(enabled: Boolean) = savePerf({ RootShell.setRamCache(enabled) })
 
-    // ---- Rendimiento de S3: cada setter guarda su archivo y pide volver a montar ----
-
-    fun setS3Streams(value: Int?) = saveS3Perf(ModulePaths.S3_STREAMS, value) { it.copy(streams = value) }
-
-    fun setS3UploadConcurrency(value: Int?) =
-        saveS3Perf(ModulePaths.S3_UPLOAD_CONC, value) { it.copy(uploadConcurrency = value) }
-
-    fun setS3ChunkMb(value: Int?) = saveS3Perf(ModulePaths.S3_CHUNK_MB, value) { it.copy(chunkMb = value) }
-
+    fun setS3Streams(value: Int?) = saveS3Perf(ModulePaths.S3_STREAMS, value)
+    fun setS3UploadConcurrency(value: Int?) = saveS3Perf(ModulePaths.S3_UPLOAD_CONC, value)
+    fun setS3ChunkMb(value: Int?) = saveS3Perf(ModulePaths.S3_CHUNK_MB, value)
     fun setS3FewerRequests(value: Boolean?) =
-        saveS3Perf(ModulePaths.S3_FEWER_REQ, value?.let { if (it) 1 else 0 }) { it.copy(fewerRequests = value) }
+        saveS3Perf(ModulePaths.S3_FEWER_REQ, value?.let { if (it) 1 else 0 })
+    fun setS3DirCacheMin(value: Int?) = saveS3Perf(ModulePaths.S3_DIR_CACHE_MIN, value)
+    fun resetS3Perf() = savePerf({ RootShell.resetS3Perf() })
 
-    fun setS3DirCacheMin(value: Int?) =
-        saveS3Perf(ModulePaths.S3_DIR_CACHE_MIN, value) { it.copy(dirCacheMin = value) }
+    private fun saveS3Perf(file: String, value: Int?) =
+        savePerf({ RootShell.setS3PerfValue(file, value) })
 
-    /** Vuelve todos los ajustes de S3 a automático. */
-    fun resetS3Perf() = viewModelScope.launch {
-        s3Perf = S3PerfSettings()
-        val result = withContext(Dispatchers.IO) { RootShell.resetS3Perf() }
-        message = perfSaveMessage(result)
-    }
-
-    private fun saveS3Perf(file: String, value: Int?, update: (S3PerfSettings) -> S3PerfSettings) =
-        viewModelScope.launch {
-            s3Perf = update(s3Perf)
-            val result = withContext(Dispatchers.IO) { RootShell.setS3PerfValue(file, value) }
+    private fun savePerf(write: () -> RootShell.Result) = viewModelScope.launch {
+        perfSaveMutex.withLock {
+            val result = withContext(Dispatchers.IO) { write() }
+            val saved = withContext(Dispatchers.IO) {
+                SnapshotPerf(RootShell.readPerfMode(), RootShell.readCacheGb(),
+                    RootShell.readRamCache(), RootShell.readS3Perf())
+            }
+            perfMode = saved.mode
+            cacheGb = saved.cacheGb
+            ramCache = saved.ramCache
+            s3Perf = saved.s3
             message = perfSaveMessage(result)
         }
+    }
+
+    private data class SnapshotPerf(
+        val mode: PerfMode, val cacheGb: Int?, val ramCache: Boolean, val s3: S3PerfSettings
+    )
 
     private fun perfSaveMessage(result: RootShell.Result): String? = when {
         !result.success -> "Error al guardar: ${result.output.take(200)}"

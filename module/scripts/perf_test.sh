@@ -239,6 +239,11 @@ fi
 step space RUN "Midiendo el espacio libre"
 set -- $(df -k "$CACHE_DIR" 2>/dev/null | tail -n 1)
 FREE_KB="$4"
+# La caché existente ya ocupa parte del objetivo: no exigir N GB nuevos
+# si una parte de N ya está descargada. du es aproximado y los límites VFS
+# siguen siendo blandos.
+EXISTING_KB="$(cache_kb)"
+case "$EXISTING_KB" in ''|*[!0-9]*) EXISTING_KB=0 ;; esac
 # En RAM el tmpfs mide caché + reserva (mount.sh), así que "libre" siempre es
 # menor que eso una vez que se llena. Se compara el tamaño del tmpfs, no lo libre.
 [ "$CACHE_IS_RAM" = 1 ] && FREE_KB="$2"
@@ -248,6 +253,8 @@ case "$FREE_KB" in
         ;;
     *)
         FREE_GB=$(( FREE_KB / 1048576 ))
+        CAPACITY_KB=$FREE_KB
+        [ "$CACHE_IS_RAM" = 1 ] || CAPACITY_KB=$(( FREE_KB + EXISTING_KB ))
         NEED="${CACHE_MAX%G}"
         case "$NEED" in
             ''|*[!0-9]*)
@@ -258,14 +265,14 @@ case "$FREE_KB" in
                 case "$MOUNT_OPTS" in *min-free-space*) RESERVE=2 ;; esac
                 WHERE="en el almacenamiento"
                 [ "$CACHE_IS_RAM" = 1 ] && WHERE="en RAM"
-                if [ "$FREE_GB" -lt $(( NEED + RESERVE )) ]; then
+                if [ "$CAPACITY_KB" -lt $(( (NEED + RESERVE) * 1048576 )) ]; then
                     if [ "$CACHE_IS_RAM" = 1 ]; then
                         step space WARN "El tmpfs en RAM mide solo $FREE_GB GB: no caben la caché de $NEED GB y la reserva de $RESERVE GB. Desmonta y vuelve a montar para reajustarlo."
                     else
-                        step space WARN "Solo quedan $FREE_GB GB libres $WHERE: no caben la caché de $NEED GB y la reserva de $RESERVE GB. rclone la irá recortando."
+                        step space WARN "Solo quedan $FREE_GB GB libres $WHERE: no alcanza para completar la caché de $NEED GB y conservar $RESERVE GB. rclone intentará recortarla; archivos abiertos o subidas pendientes pueden superar el límite."
                     fi
                 else
-                    step space OK "$FREE_GB GB libres $WHERE, de sobra para una caché de $NEED GB."
+                    step space OK "$FREE_GB GB disponibles $WHERE; capacidad suficiente para completar $NEED GB de caché con la reserva. No es un límite duro de uso."
                 fi
                 ;;
         esac

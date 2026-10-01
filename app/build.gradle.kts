@@ -30,8 +30,8 @@ android {
         applicationId = "com.rclonebind.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 45
-        versionName = "1.9.7"
+        versionCode = 46
+        versionName = "1.9.8"
 
         // Cliente OAuth de Google Drive que trae la app: el usuario solo da su
         // consentimiento, sin pegar credenciales. Se inyecta en el build desde

@@ -65,8 +65,8 @@ fun S3PerfSection(vm: BindViewModel, provider: S3Provider) {
                             "así que por defecto no se recortan; puedes activarlo si quieres gastar menos."
                     S3Provider.CLOUDFLARE ->
                         "R2 no cobra por la salida de datos, pero sí por número de peticiones pasado su cupo gratis, " +
-                            "así que por defecto se recortan. La subida paralela arranca en 3 partes: con más, " +
-                            "R2 puede fallar al subir archivos grandes."
+                            "así que por defecto se recortan. La subida paralela arranca en 3 partes " +
+                            "como valor conservador para archivos grandes."
                     S3Provider.OTHER ->
                         "Valores para cualquier servicio compatible con S3."
                 },
@@ -100,13 +100,13 @@ fun S3PerfSection(vm: BindViewModel, provider: S3Provider) {
                 style = MaterialTheme.typography.titleSmall
             )
             ChipChoices(
-                choices = S3Perf.DIR_CACHE_CHOICES_MIN,
+                choices = (S3Perf.DIR_CACHE_CHOICES_MIN + dirCache).distinct().sorted(),
                 selected = dirCache,
                 label = { formatMinutes(it) },
                 onSelect = { vm.setS3DirCacheMin(it) }
             )
             Text(
-                "Cuánto tarda en verse un archivo subido por fuera del montaje.",
+                "Ajustes globales de S3: se aplican al servidor que montes. Los cambios externos pueden tardar este tiempo en verse.",
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant
             )
@@ -147,9 +147,9 @@ fun S3PerfSection(vm: BindViewModel, provider: S3Provider) {
                 val ram = S3Perf.uploadRamMb(used, chunk)
                 Text(
                     if (used < requested) {
-                        "RAM de subida: hasta $ram MB. Se usarán $used partes a la vez en vez de $requested para no pasar de ${S3Perf.UPLOAD_RAM_CAP_MB} MB."
+                        "Buffers multiparte: aprox. $ram MB. Se usarán $used partes a la vez en vez de $requested para no pasar de ${S3Perf.UPLOAD_RAM_CAP_MB} MB."
                     } else {
-                        "RAM de subida: hasta $ram MB."
+                        "Buffers multiparte: aprox. $ram MB; no incluye lecturas ni la RAM del resto de la app."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (used < requested) scheme.error else scheme.onSurfaceVariant
