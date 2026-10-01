@@ -71,10 +71,10 @@ val LocalContentBottomInset = compositionLocalOf { 0.dp }
 val LocalContentEndInset = compositionLocalOf { 0.dp }
 
 /**
- * A partir de este ancho de pantalla hay espacio real para dos columnas
+ * A partir de este ancho de pantalla hay espacio real para varias columnas
  * (apaisado en casi cualquier celular, o una tablet en cualquier
  * orientación); por debajo, una sola columna apilada. Lo usan Servidores
- * (paneles de FTP y Google Drive) e Inicio (montaje y ajustes).
+ * (tres paneles: FTP, Google Drive y S3) e Inicio (montaje y ajustes, dos).
  */
 const val DualPaneMinWidthDp = 700
 
@@ -82,7 +82,7 @@ const val DualPaneMinWidthDp = 700
 @Composable
 fun rememberIsDualPane(): Boolean = LocalConfiguration.current.screenWidthDp >= DualPaneMinWidthDp
 
-/** Ancho del contenido cuando una pantalla arma doble panel: más que el máximo normal (640–780dp), porque son dos columnas. */
+/** Ancho del contenido cuando una pantalla arma varias columnas: más que el máximo normal (640–780dp), para que entren con holgura. */
 val DualPaneContentWidth = 1080.dp
 
 /**

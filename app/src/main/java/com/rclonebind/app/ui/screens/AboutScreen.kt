@@ -143,8 +143,9 @@ private fun WhatItDoesCard() {
     SectionCard(
         title = "Qué hace",
         icon = Icons.Default.Info,
-        subtitle = "Monta un servidor FTP o Google Drive con rclone y lo muestra como una carpeta " +
-            "más de tu almacenamiento interno, para que cualquier app pueda usarlo."
+        subtitle = "Monta un servidor FTP, Google Drive o un bucket S3 (Oracle Cloud, Amazon S3, " +
+            "Cloudflare R2 y compatibles) con rclone y lo muestra como una carpeta más de tu " +
+            "almacenamiento interno, para que cualquier app pueda usarlo."
     ) {
         Text(
             "1. Agrega un servidor en la pestaña Servidores.\n" +

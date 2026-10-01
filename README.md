@@ -67,7 +67,7 @@ sequenceDiagram
 - Cada servidor es una tarjeta; la seleccionada se abre y las demás asoman su franja.
 - Tocar una tarjeta elige cuál se monta. Agregar, editar y eliminar desde la misma pantalla.
 - Compatible con **FTP**, **Google Drive** y **S3** (Oracle Cloud Object Storage, Amazon S3, Cloudflare R2 y cualquier servicio compatible).
-- En pantalla ancha (apaisado, tablets) se ven **dos paneles uno al lado del otro**, uno por tipo de remoto; en vertical siguen mezclados en una sola pila, como siempre.
+- En pantalla ancha (apaisado, tablets) se ven **tres paneles uno al lado del otro**, uno por tipo de remoto (FTP, Google Drive y S3); en vertical siguen mezclados en una sola pila, como siempre.
 - Las contraseñas se guardan ofuscadas con `rclone obscure`.
 - Al editar, dejar la contraseña vacía conserva la anterior.
 
@@ -175,30 +175,3 @@ sequenceDiagram
 <p align="center">
   <sub>Usa <a href="https://rclone.org">rclone</a> (MIT), <a href="https://github.com/topjohnwu/libsu">libsu</a> (Apache 2.0) y <a href="https://github.com/chrisbanes/haze">Haze</a> (Apache 2.0).</sub>
 </p>
-
-
-## Desarrollo y validación (1.9.9)
-
-Este ZIP es código fuente, **no un módulo flasheable ni un APK compilado**.
-El archivo de origen no incluía Gradle Wrapper, workflows ni los binarios de rclone/fusermount3.
-Se añade CI que ejecuta pruebas sin dependencias y compila un APK debug con Gradle 8.13 y JDK 17.
-No publica releases ni empaqueta un módulo incompleto. El primer build requiere acceso a los repositorios de dependencias.
-
-```sh
-python3 -m unittest discover -s tests -v
-# Con Gradle 8.13, JDK 17 y Android SDK (API 36):
-gradle --no-daemon :app:assembleDebug
-```
-
-La clave `debug.keystore` ya venía en el proyecto y se conserva para mantener compatibilidad de firma debug.
-**Es pública: no usarla como firma de producción.** Para producción usa una clave privada propia fuera del repositorio.
-Los cambios conservan los archivos de configuración; para aplicarlos hay que actualizar app y scripts del módulo, desmontar y volver a montar.
-Ver `CHANGELOG.md` y `VALIDATION.md` para el alcance y las limitaciones de estas comprobaciones.
-
-### Corrección de la precarga (1.9.9-fix)
-
-- `preload.sh`: el candado guarda el PID y se recupera si el proceso murió (antes un candado huérfano hacía que la precarga saliera en silencio para siempre).
-- `preload.sh`: el trap de TERM/INT/HUP ahora termina el script y sus hijos (antes seguía corriendo y borraba los temporales de la corrida nueva).
-- `preload.sh`: el temporizador por archivo ya no deja un `sleep` huérfano por archivo (agotaba los PID: «Cannot fork»).
-- `preload.sh`: latido durante el listado del remoto, para que la app no lo confunda con una precarga colgada.
-- App: un `preload_status.json` con `running:true` sin actualizarse en 45 s se considera muerto y el botón se reactiva.
