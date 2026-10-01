@@ -166,7 +166,7 @@ fun ScreenContainer(
             // fija con scroll propio y un degradado la taparía.
             val fadeExtraPx = fadeExtra.roundToPx()
             val fade = if (scroll && title != null) {
-                subcompose("fade") { TopFade(scrollState, fadeExtraPx.toFloat()) }
+                subcompose("fade") { TopFade(scrollState, fadeExtraPx.toFloat(), titleH.toFloat() / (titleH + fadeExtraPx)) }
                     .map { it.measure(Constraints.fixed(w, titleH + fadeExtraPx)) }
             } else emptyList()
 
@@ -182,7 +182,7 @@ fun ScreenContainer(
 
 /**
  * Difuminado de la barra del título: mismo degradado que el de la barra de
- * gestos (mismos tramos y opacidades) pero espejado, de opaco arriba a
+ * gestos pero espejado y más opaco detrás del título, de opaco arriba a
  * transparente abajo. Cubre TODA la barra (título y acciones) más una franja
  * extra por debajo, así lo que pasa por detrás de las palabras también se
  * funde. Su intensidad crece con el desplazamiento (0 en reposo, completa
@@ -191,17 +191,21 @@ fun ScreenContainer(
  * graphicsLayer: se anima sin recomponer. No intercepta toques.
  */
 @Composable
-private fun TopFade(scrollState: ScrollState, rampPx: Float) {
+private fun TopFade(scrollState: ScrollState, rampPx: Float, titleFraction: Float) {
     val fade = MaterialTheme.colorScheme.background
     Box(
         Modifier
             .fillMaxSize()
             .graphicsLayer { alpha = (scrollState.value / rampPx).coerceIn(0f, 1f) }
             .background(
+                // Detrás del título (y los botones) casi opaco, para que el
+                // contenido no compita con las palabras; el degradado real
+                // ocurre en la franja de debajo de la barra.
                 Brush.verticalGradient(
-                    0f to fade.copy(alpha = 0.96f),
-                    0.3f to fade.copy(alpha = 0.7f),
-                    0.65f to fade.copy(alpha = 0.25f),
+                    0f to fade.copy(alpha = 1f),
+                    titleFraction * 0.7f to fade.copy(alpha = 0.97f),
+                    titleFraction to fade.copy(alpha = 0.85f),
+                    titleFraction + (1f - titleFraction) * 0.5f to fade.copy(alpha = 0.4f),
                     1f to Color.Transparent
                 )
             )
