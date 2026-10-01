@@ -60,11 +60,6 @@ STATUS_FILE="$MODDIR/status.json"
 RCLONE_CONF="$MODDIR/config/rclone.conf"
 PRELOAD_STATUS="$MODDIR/preload_status.json"
 
-# Restos de una corrida anterior que no terminó bien (el móvil se reinició a
-# la mitad, por ejemplo). No son el candado: ese se trata aparte.
-rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
-      "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done 2>/dev/null
-
 # Nota: los tamaños se suman siempre con awk y no con $(( )): el mksh de
 # Android hace la aritmética en 32 bits con signo, y un archivo de más de
 # 2 GiB daba MB negativos (p. ej. -1581 para uno de 2515 MB).
@@ -78,15 +73,43 @@ write_status() {
         > "$PRELOAD_STATUS.tmp" 2>/dev/null && mv "$PRELOAD_STATUS.tmp" "$PRELOAD_STATUS"
 }
 
-# Evita dos precargas a la vez (p. ej. dos montajes seguidos). mount.sh ya
-# limpia este candado antes de lanzar una nueva, así que uno viejo colgado
-# aquí es de un proceso que sigue vivo de verdad.
+# Evita dos precargas a la vez. El candado guarda el PID de quien lo tiene: si
+# ese proceso ya no existe (kill -9, reinicio a mitad de corrida) el candado
+# es huérfano y se recupera, en vez de salir en silencio para siempre.
 LOCK="$MODDIR/preload.lock"
-mkdir "$LOCK" 2>/dev/null || exit 0
-trap '[ -n "$MONITOR_PID" ] && kill "$MONITOR_PID" 2>/dev/null
-      rm -rf "$LOCK"
-      rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
-            "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done' EXIT INT TERM HUP
+if ! mkdir "$LOCK" 2>/dev/null; then
+    OLD_PID="$(cat "$LOCK/pid" 2>/dev/null)"
+    if [ -n "$OLD_PID" ] && [ "$OLD_PID" != "$$" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+        exit 0
+    fi
+    rm -rf "$LOCK"
+    mkdir "$LOCK" 2>/dev/null || exit 0
+fi
+echo $$ > "$LOCK/pid"
+
+# Restos de una corrida anterior que no terminó bien. Va DESPUÉS del candado:
+# antes se borraba también cuando otra instancia salía por el candado ocupado,
+# pisando los archivos de la corrida que sí estaba en marcha.
+rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_list.raw "$MODDIR"/.preload_selected \
+      "$MODDIR"/.preload_part_* "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* \
+      "$MODDIR"/.preload_all_done 2>/dev/null
+
+cleanup() {
+    # Solo limpia si el candado sigue siendo de esta corrida (una nueva puede
+    # haberlo tomado ya) y detiene a sus hijos para que no queden huérfanos.
+    [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ] || return 0
+    [ -n "$HB_PID" ] && kill "$HB_PID" 2>/dev/null
+    [ -n "$MONITOR_PID" ] && kill "$MONITOR_PID" 2>/dev/null
+    [ -n "$WPIDS" ] && kill $WPIDS 2>/dev/null
+    rm -rf "$LOCK"
+    rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_list.raw "$MODDIR"/.preload_selected \
+          "$MODDIR"/.preload_part_* "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* \
+          "$MODDIR"/.preload_all_done
+}
+# TERM/INT/HUP: antes el trap limpiaba pero NO terminaba el script, que seguía
+# su curso, escribía "terminada" y borraba los archivos de la corrida nueva.
+trap cleanup EXIT
+trap 'exit 143' INT TERM HUP
 
 ACTIVE="$(sed -n 's/.*"remote":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
 T="$(sed -n 's/.*"target":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
@@ -143,7 +166,16 @@ run_with_timeout() {
     tl="$1"; shift
     "$@" &
     cpid=$!
-    ( sleep "$tl"; kill -TERM "$cpid" 2>/dev/null; sleep 2; kill -KILL "$cpid" 2>/dev/null ) &
+    (
+        # El sleep va en segundo plano y se mata al terminar: si no, cada
+        # archivo dejaba un "sleep 300" huérfano (con miles de archivos
+        # chicos, miles de procesos hasta agotar los PID: "Cannot fork").
+        sleep "$tl" &
+        sp=$!
+        trap 'kill "$sp" 2>/dev/null; exit 0' TERM
+        wait "$sp" 2>/dev/null
+        kill -TERM "$cpid" 2>/dev/null; sleep 2; kill -KILL "$cpid" 2>/dev/null
+    ) &
     wpid=$!
     wait "$cpid" 2>/dev/null
     rc=$?
@@ -152,6 +184,10 @@ run_with_timeout() {
     return "$rc"
 }
 TAB="$(printf '\t')"
+# Latido mientras se lista el remoto (en un FTP grande puede tardar minutos):
+# la app lo toma como "sigue viva" y no como una precarga colgada.
+( while :; do write_status true 0 0; sleep 5; done ) &
+HB_PID=$!
 FILELIST="$MODDIR/.preload_list"
 
 # Lista "bytes<TAB>ruta" en UNA pasada: find agrupa las rutas y las pasa a
@@ -206,6 +242,7 @@ if [ "$FORCE" != "force" ] && [ "$CACHE_IS_RAM" = 0 ] && [ -f "$MARKER" ]; then
 fi
 
 if [ "$MARKER_OK" = 1 ]; then
+    kill "$HB_PID" 2>/dev/null; wait "$HB_PID" 2>/dev/null; HB_PID=""
     echo "$(date): Precarga: '$ACTIVE' ya estaba precargado por completo (sin cambios), se omite" >> "$LOG_FILE"
     N_SELECTED="$TOTAL"
     DONE_MB="$(( $(printf '%s' "$FP_NOW" | awk '{print $2}') / 1024 ))"
@@ -245,6 +282,7 @@ set -- $(awk -F "$TAB" -v budget="$BUDGET_MB" -v maxf="$MAX_FILES" \
 ' "$FILELIST" 2>/dev/null)
 N_SELECTED="${1:-0}"
 DONE_MB="${2:-0}"
+kill "$HB_PID" 2>/dev/null; wait "$HB_PID" 2>/dev/null; HB_PID=""
 write_status true 0 0
 
 preload_worker() {
@@ -303,7 +341,7 @@ w=0
 while [ "$w" -lt "$WORKERS" ]; do
     PART="$MODDIR/.preload_part_$w"
     if [ -s "$PART" ]; then
-        ( preload_worker "$PART" "$w" ) &
+        ( trap '[ -n "$cpid" ] && kill "$cpid" 2>/dev/null; exit 143' TERM INT HUP; preload_worker "$PART" "$w" ) &
         WPIDS="$WPIDS $!"
     fi
     w=$(( w + 1 ))

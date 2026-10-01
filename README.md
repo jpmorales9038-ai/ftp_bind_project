@@ -194,3 +194,11 @@ La clave `debug.keystore` ya venía en el proyecto y se conserva para mantener c
 **Es pública: no usarla como firma de producción.** Para producción usa una clave privada propia fuera del repositorio.
 Los cambios conservan los archivos de configuración; para aplicarlos hay que actualizar app y scripts del módulo, desmontar y volver a montar.
 Ver `CHANGELOG.md` y `VALIDATION.md` para el alcance y las limitaciones de estas comprobaciones.
+
+### Corrección de la precarga (1.9.9-fix)
+
+- `preload.sh`: el candado guarda el PID y se recupera si el proceso murió (antes un candado huérfano hacía que la precarga saliera en silencio para siempre).
+- `preload.sh`: el trap de TERM/INT/HUP ahora termina el script y sus hijos (antes seguía corriendo y borraba los temporales de la corrida nueva).
+- `preload.sh`: el temporizador por archivo ya no deja un `sleep` huérfano por archivo (agotaba los PID: «Cannot fork»).
+- `preload.sh`: latido durante el listado del remoto, para que la app no lo confunda con una precarga colgada.
+- App: un `preload_status.json` con `running:true` sin actualizarse en 45 s se considera muerto y el botón se reactiva.
