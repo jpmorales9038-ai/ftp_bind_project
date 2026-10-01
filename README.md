@@ -19,7 +19,7 @@
   <img alt="Material 3" src="https://img.shields.io/badge/Material%203-6750A4?style=flat-square&logo=materialdesign&logoColor=white">
 </p>
 
-<h3 align="center">Monta servidores FTP y Google Drive como una carpeta más de tu almacenamiento interno.<br>Cualquier app puede usarlos, sin configurar nada en cada una.</h3>
+<h3 align="center">Monta servidores FTP, Google Drive y buckets S3 (Oracle Cloud y compatibles) como una carpeta más de tu almacenamiento interno.<br>Cualquier app puede usarlos, sin configurar nada en cada una.</h3>
 
 ---
 
@@ -29,6 +29,7 @@
 flowchart LR
     A["Servidor FTP"] --> R
     B["Google Drive"] --> R
+    S["Bucket S3 / Oracle"] --> R
     R["rclone mount<br/>(FUSE)"] --> M["mount --bind"]
     M --> C["/sdcard/FTP<br/>o la carpeta que elijas"]
     C --> D["Galería"]
@@ -65,7 +66,7 @@ sequenceDiagram
 
 - Cada servidor es una tarjeta; la seleccionada se abre y las demás asoman su franja.
 - Tocar una tarjeta elige cuál se monta. Agregar, editar y eliminar desde la misma pantalla.
-- Compatible con **FTP** y **Google Drive**.
+- Compatible con **FTP**, **Google Drive** y **S3** (Oracle Cloud Object Storage y cualquier servicio compatible).
 - En pantalla ancha (apaisado, tablets) se ven **dos paneles uno al lado del otro**, uno por tipo de remoto; en vertical siguen mezclados en una sola pila, como siempre.
 - Las contraseñas se guardan ofuscadas con `rclone obscure`.
 - Al editar, dejar la contraseña vacía conserva la anterior.
@@ -76,6 +77,16 @@ sequenceDiagram
 - Sondea el puerto 21 y los que usan las apps de servidor FTP para Android y Termux (2121, 2221 y 2222).
 - Usa la red Wi-Fi o Ethernet real aunque haya datos móviles o VPN activos.
 - No necesita root: elegir uno rellena Host y Puerto.
+
+### S3 y Oracle Cloud Object Storage
+
+- En **Nuevo servidor > S3** eliges **Oracle Cloud** (namespace + región; el endpoint `https://<namespace>.compat.objectstorage.<región>.oraclecloud.com` se arma solo) u **Otro proveedor** (endpoint propio: MinIO, Wasabi, R2, B2...).
+- Se inicia sesión con una clave de acceso: en Oracle, una **Customer Secret Key** (Perfil > Mi perfil > Claves secretas de cliente). La clave secreta solo existe en `rclone.conf` (chmod 600).
+- **Bucket** opcional (`bucket` o `bucket/carpeta`): se monta solo ese. Vacío monta la lista de buckets, pero Oracle exige permisos de listado; si tu clave no los tiene, escribe el bucket.
+- Al guardar, lista el bucket con la clave para confirmar endpoint, región, permisos y red, y traduce los errores típicos (`SignatureDoesNotMatch`, `AccessDenied`, `NoSuchBucket`...).
+- **Icono por proveedor:** cada proveedor S3 tiene su propio icono (Oracle Cloud lleva su logo; los demás, una nube genérica). El proveedor se detecta por el dominio del endpoint (`S3Provider` en `Conf.kt`); para agregar uno nuevo basta una entrada del enum con los sufijos de su dominio y su icono en `serverIconFor` (`StyleKit.kt`).
+- **Carpetas vacías:** se monta con `--s3-directory-markers` (rclone 1.64+): al crear una carpeta desde el explorador rclone sube un objeto vacío `carpeta/`, así se conserva aunque no tenga archivos y se puede montar vacía.
+- El bucket se guarda en la clave propia `bind_path` de la sección; rclone la ignora y la leen `mount.sh` y `check_remote.sh`.
 
 ### Google Drive sin PC
 
@@ -132,7 +143,7 @@ sequenceDiagram
 | Root | KernelSU |
 | Android | 8.0 o superior |
 | Arquitectura | arm64 |
-| Remotos | FTP, Google Drive |
+| Remotos | FTP, Google Drive, S3 |
 | Motor | [rclone](https://rclone.org) |
 
 ---

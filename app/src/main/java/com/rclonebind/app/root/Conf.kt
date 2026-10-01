@@ -3,7 +3,9 @@ package com.rclonebind.app.root
 /** Tipos de remoto que la app sabe crear (el valor de "type" en rclone.conf). */
 enum class RemoteType(val rclone: String, val label: String) {
     FTP("ftp", "FTP"),
-    DRIVE("drive", "Google Drive")
+    DRIVE("drive", "Google Drive"),
+    /** Almacenamiento de objetos compatible con S3 (Oracle Cloud Object Storage, etc.). */
+    S3("s3", "S3")
 }
 
 /** Perfil de rendimiento del montaje (lo lee scripts/mount.sh desde config/perf). */
@@ -45,9 +47,27 @@ data class DriveOptions(
 )
 
 /**
- * Un servidor guardado (FTP o Google Drive). Los campos host/port/user/
- * hasPassword solo aplican a FTP; [drive] solo a Google Drive. Las
- * contraseñas y el token de sesión nunca salen del rclone.conf.
+ * Ajustes de un remoto S3. La clave secreta nunca sale del rclone.conf (solo
+ * se sabe si existe, en [hasSecret]).
+ *
+ * [bucket] es el bucket que se monta, con subcarpeta opcional ("bucket" o
+ * "bucket/carpeta"); vacío monta la lista de todos los buckets. Se guarda en
+ * la clave propia "bind_path" de la sección: rclone la ignora y la leen
+ * mount.sh y check_remote.sh.
+ */
+data class S3Options(
+    val endpoint: String = "",
+    val region: String = "",
+    val accessKeyId: String = "",
+    val bucket: String = "",
+    val hasSecret: Boolean = false
+)
+
+/**
+ * Un servidor guardado (FTP, Google Drive o S3). Los campos host/port/user/
+ * hasPassword solo aplican a FTP; [drive] solo a Google Drive y [s3] solo a
+ * S3. Las contraseñas, claves secretas y el token de sesión nunca salen del
+ * rclone.conf.
  */
 data class RemoteProfile(
     val name: String,
@@ -56,8 +76,50 @@ data class RemoteProfile(
     val port: String = "21",
     val user: String = "",
     val hasPassword: Boolean = false,
-    val drive: DriveOptions? = null
+    val drive: DriveOptions? = null,
+    val s3: S3Options? = null
 )
+
+/**
+ * Proveedores S3 que la app distingue (cada uno con su propio icono, ver
+ * serverIconFor en StyleKit.kt). Se detecta por el dominio del endpoint, sin
+ * guardar nada extra en rclone.conf: para agregar un proveedor nuevo basta
+ * con una entrada aquí (con los sufijos de su dominio) y su icono.
+ */
+enum class S3Provider(val label: String, private val hostSuffixes: List<String>) {
+    ORACLE("Oracle Cloud", listOf(".oraclecloud.com")),
+    /** Cualquier otro servicio compatible con S3. */
+    OTHER("Otro proveedor", emptyList());
+
+    companion object {
+        fun fromEndpoint(endpoint: String): S3Provider {
+            val host = endpoint.trim().lowercase()
+                .substringAfter("://")
+                .substringBefore("/")
+                .substringBefore(":")
+            return entries.firstOrNull { p -> p.hostSuffixes.any { host.endsWith(it) } } ?: OTHER
+        }
+    }
+}
+
+/** Proveedor del servidor S3, o null si no es de tipo S3. */
+val RemoteProfile.s3Provider: S3Provider?
+    get() = s3?.let { S3Provider.fromEndpoint(it.endpoint) }
+
+/** Línea corta que identifica el servidor en tarjetas y en Inicio. */
+val RemoteProfile.subtitle: String
+    get() = when (type) {
+        RemoteType.FTP -> if (user.isEmpty()) host else "$user@$host"
+        RemoteType.DRIVE -> RemoteType.DRIVE.label
+        RemoteType.S3 -> {
+            val opts = s3
+            when {
+                opts == null -> RemoteType.S3.label
+                opts.bucket.isNotEmpty() -> opts.bucket
+                else -> opts.endpoint.removePrefix("https://").removePrefix("http://")
+            }
+        }
+    }
 
 /** rclone.conf en memoria: sección -> (clave -> valor), conservando el orden. */
 typealias Conf = LinkedHashMap<String, LinkedHashMap<String, String>>
@@ -113,7 +175,18 @@ fun Conf.toProfiles(): List<RemoteProfile> =
                     hasToken = !v["token"].isNullOrEmpty()
                 )
             )
-            // Otros tipos (sftp, s3...) que el usuario haya puesto a mano se
+            RemoteType.S3.rclone -> RemoteProfile(
+                name = entry.key,
+                type = RemoteType.S3,
+                s3 = S3Options(
+                    endpoint = v["endpoint"].orEmpty(),
+                    region = v["region"].orEmpty(),
+                    accessKeyId = v["access_key_id"].orEmpty(),
+                    bucket = v["bind_path"].orEmpty(),
+                    hasSecret = !v["secret_access_key"].isNullOrEmpty()
+                )
+            )
+            // Otros tipos (sftp...) que el usuario haya puesto a mano se
             // conservan en el archivo pero no se muestran en la app.
             else -> null
         }
@@ -135,6 +208,61 @@ fun cleanHost(raw: String): String =
         .removePrefix("https://")
         .substringBefore("/")
         .substringBefore(":")
+
+// ---- S3 / Oracle Cloud Object Storage ----
+
+// Endpoint de la API de compatibilidad S3 de Oracle:
+//   https://<namespace>.compat.objectstorage.<región>.oraclecloud.com
+private val ORACLE_ENDPOINT =
+    Regex("""^https://([A-Za-z0-9_-]+)\.compat\.objectstorage\.([a-z0-9-]+)\.oraclecloud\.com/?$""")
+
+// Región de Oracle: us-ashburn-1, eu-frankfurt-1, sa-saopaulo-1...
+private val ORACLE_REGION = Regex("^[a-z]{2}-[a-z0-9]+-[0-9]+$")
+private val ORACLE_NAMESPACE = Regex("^[A-Za-z0-9_-]+$")
+private val S3_BUCKET = Regex("^[A-Za-z0-9._-]+(/\\S.*)?$")
+
+fun oracleEndpoint(namespace: String, region: String): String =
+    "https://${namespace.trim()}.compat.objectstorage.${region.trim()}.oraclecloud.com"
+
+/** Namespace y región si [endpoint] es de Oracle Cloud; null si es de otro proveedor. */
+fun parseOracleEndpoint(endpoint: String): Pair<String, String>? =
+    ORACLE_ENDPOINT.find(endpoint.trim())?.let { it.groupValues[1] to it.groupValues[2] }
+
+/** Errores de los campos de Oracle (namespace, región), o null si están bien. */
+fun validateOracleNamespace(namespace: String): String? = when {
+    namespace.isEmpty() -> "Escribe el namespace"
+    !ORACLE_NAMESPACE.matches(namespace) -> "Solo letras, números, - y _"
+    else -> null
+}
+
+fun validateOracleRegion(region: String): String? = when {
+    region.isEmpty() -> "Escribe la región"
+    !ORACLE_REGION.matches(region) -> "Formato de región, por ejemplo us-ashburn-1"
+    else -> null
+}
+
+/** Endpoint escrito a mano: se completa el https:// y se quita la barra final. */
+fun cleanS3Endpoint(raw: String): String {
+    val t = raw.trim().trimEnd('/')
+    return if (t.isEmpty() || t.contains("://")) t else "https://$t"
+}
+
+fun validateS3Endpoint(endpoint: String): String? = when {
+    endpoint.isEmpty() -> "Escribe el endpoint"
+    !(endpoint.startsWith("https://") || endpoint.startsWith("http://")) -> "Debe empezar con https://"
+    endpoint.length <= "https://".length -> "Endpoint incompleto"
+    endpoint.any { it.isWhitespace() } -> "No puede llevar espacios"
+    else -> null
+}
+
+/** Bucket pegado como "s3://bucket/carpeta" o "/bucket/": se deja "bucket/carpeta". */
+fun cleanS3Bucket(raw: String): String =
+    raw.trim().removePrefix("s3://").trim('/')
+
+/** El bucket es opcional: vacío es válido (se listan todos los buckets). */
+fun validateS3Bucket(bucket: String): String? =
+    if (bucket.isEmpty() || S3_BUCKET.matches(bucket)) null
+    else "Bucket inválido: letras, números, . - _ (y /carpeta opcional)"
 
 // Patrones de link para compartir una carpeta de Drive:
 //   https://drive.google.com/drive/folders/<id>?usp=sharing

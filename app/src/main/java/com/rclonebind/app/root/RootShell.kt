@@ -213,6 +213,52 @@ object RootShell {
         return writeConf(putSection(conf, original, name, section))
     }
 
+    // Claves que la app administra en un remoto S3; el resto (storage_class,
+    // upload_cutoff, chunk_size...) que el usuario haya puesto a mano se conserva.
+    private val S3_MANAGED_KEYS = setOf(
+        "type", "provider", "env_auth", "access_key_id", "secret_access_key",
+        "region", "endpoint", "no_check_bucket", "bind_path"
+    )
+
+    /**
+     * Crea o edita un remoto S3 (Oracle Cloud Object Storage u otro
+     * compatible). Con [secret] vacío al editar se conserva la clave secreta
+     * ya guardada. A diferencia de la contraseña FTP, rclone espera la clave
+     * secreta de S3 en claro (no ofuscada); el archivo queda con chmod 600.
+     */
+    fun saveS3Profile(original: String?, name: String, options: S3Options, secret: String): Result {
+        val conf = readConf()
+        if (name != original && conf.containsKey(name)) {
+            return Result(false, "Ya existe un servidor llamado $name")
+        }
+        val old = original?.let { conf[it] }
+        val finalSecret = secret.ifEmpty { old?.get("secret_access_key").orEmpty() }
+        if (finalSecret.isEmpty()) {
+            return Result(false, "Falta la clave secreta")
+        }
+
+        val section = LinkedHashMap<String, String>()
+        section["type"] = RemoteType.S3.rclone
+        // "Other" = cualquier S3 compatible con endpoint propio (direccionamiento
+        // por ruta). Si el usuario ya puso otro proveedor a mano, se respeta.
+        section["provider"] = old?.get("provider") ?: "Other"
+        section["env_auth"] = old?.get("env_auth") ?: "false"
+        section["access_key_id"] = options.accessKeyId
+        section["secret_access_key"] = finalSecret
+        if (options.region.isNotEmpty()) section["region"] = options.region
+        section["endpoint"] = options.endpoint
+        // No intentar crear el bucket al escribir: en Oracle la clave suele
+        // no tener permiso de crear buckets y rclone fallaría al subir.
+        section["no_check_bucket"] = old?.get("no_check_bucket") ?: "true"
+        if (options.bucket.isNotEmpty()) section["bind_path"] = options.bucket
+        if (old != null) {
+            for ((k, v) in old) {
+                if (k !in S3_MANAGED_KEYS && !section.containsKey(k)) section[k] = v
+            }
+        }
+        return writeConf(putSection(conf, original, name, section))
+    }
+
     fun deleteProfile(name: String): Result {
         val conf = readConf()
         conf.remove(name)

@@ -10,6 +10,7 @@ import com.rclonebind.app.root.DEFAULT_TARGET_PATH
 import com.rclonebind.app.root.DriveAuthParser
 import com.rclonebind.app.root.DriveAuthState
 import com.rclonebind.app.root.DriveOptions
+import com.rclonebind.app.root.S3Options
 import com.rclonebind.app.root.PerfMode
 import com.rclonebind.app.root.PerfTestParser
 import com.rclonebind.app.root.PerfTestState
@@ -229,6 +230,60 @@ class BindViewModel : ViewModel() {
                 ?: "sin respuesta (sin red o tiempo agotado)"
             "Guardado, pero no se pudo conectar: $detail"
         }
+    }
+
+    /**
+     * Guarda un servidor S3 y comprueba que responde (lista el bucket, o los
+     * buckets si no se puso uno): así una clave, región o endpoint mal
+     * escritos se ven ahora y no recién al intentar montar.
+     */
+    fun saveS3Profile(
+        original: String?,
+        name: String,
+        options: S3Options,
+        secret: String
+    ) = viewModelScope.launch {
+        val cleanName = name.trim()
+        val wasActive = original != null && original == activeName
+        val result = withContext(Dispatchers.IO) {
+            val r = RootShell.saveS3Profile(original, cleanName, options, secret.trim())
+            if (r.success && (original == null || wasActive)) RootShell.setActive(cleanName)
+            r
+        }
+        if (!result.success) {
+            message = "Error al guardar: ${result.output.take(200)}"
+            reload()
+            return@launch
+        }
+        message = "Servidor guardado"
+        reload()
+
+        val check = withContext(Dispatchers.IO) { RootShell.checkRemote(cleanName) }
+        message = if (check.success) {
+            "S3 conectado"
+        } else {
+            "Guardado, pero no se pudo conectar: ${describeS3Error(check.output)}"
+        }
+    }
+
+    /** Traduce los errores típicos de S3 a algo que el usuario pueda corregir. */
+    private fun describeS3Error(output: String): String {
+        val last = output.lines().lastOrNull { it.isNotBlank() }?.take(200)
+            ?: return "sin respuesta (sin red o tiempo agotado)"
+        val hint = when {
+            "SignatureDoesNotMatch" in output ->
+                "la clave secreta o la región no coinciden"
+            "InvalidAccessKeyId" in output || "InvalidClientTokenId" in output ->
+                "la clave de acceso no existe"
+            "AccessDenied" in output || "403" in output ->
+                "sin permiso: revisa las políticas de la clave y del bucket"
+            "NoSuchBucket" in output || "directory not found" in output ->
+                "el bucket no existe en ese namespace/región"
+            "no such host" in output || "lookup" in output ->
+                "no se resuelve el endpoint: revisa namespace y región"
+            else -> null
+        }
+        return if (hint != null) "$hint ($last)" else last
     }
 
     private var authJob: Job? = null

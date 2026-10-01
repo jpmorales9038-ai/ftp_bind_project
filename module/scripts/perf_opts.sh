@@ -7,25 +7,62 @@
 #   . "$MODDIR/scripts/perf_opts.sh"
 #   compute_mount_opts      # deja el resultado en $MOUNT_OPTS (y $PERF)
 
-# Tipo del remoto (ftp, drive...): lee la clave "type" de su sección. Se hace
-# con "case" y no con sed para no depender de caracteres especiales en el
-# nombre.
-remote_type() {
+# Valor de una clave de la sección de un remoto en rclone.conf (o nada si no
+# está). Se hace con "case" y no con sed para no depender de caracteres
+# especiales en el nombre. Uso: remote_key <remoto> <clave>
+remote_key() {
     in_section=0
     while IFS= read -r line; do
         case "$line" in
             "[$1]") in_section=1 ;;
             "["*"]") in_section=0 ;;
-            "type "*"="*|"type="*)
+            "$2 "*"="*|"$2="*)
                 if [ "$in_section" = 1 ]; then
                     v="${line#*=}"
                     v="${v# }"
-                    echo "${v%% *}"
+                    echo "$v"
                     return
                 fi
                 ;;
         esac
     done < "$RCLONE_CONF"
+}
+
+# Tipo del remoto (ftp, drive, s3...): la clave "type" de su sección.
+remote_type() {
+    v="$(remote_key "$1" type)"
+    echo "${v%% *}"
+}
+
+# Carpeta dentro del remoto que se monta (clave "bind_path" que escribe la
+# app; en S3 es el bucket, con subcarpeta opcional). Vacía = la raíz del
+# remoto. rclone ignora las claves que no conoce, así que no le afecta.
+remote_root() {
+    remote_key "$1" bind_path
+}
+
+# Versión del binario incluido ("rclone v1.75.1" -> 1 75). Vacío si no se puede leer.
+rclone_version_parts() {
+    [ -x "$MODDIR/bin/rclone" ] || return 1
+    _v="$("$MODDIR/bin/rclone" version 2>/dev/null | head -n 1)"
+    _v="${_v#*v}"
+    _maj="${_v%%.*}"
+    _rest="${_v#*.}"
+    _min="${_rest%%.*}"
+    case "$_maj$_min" in ''|*[!0-9]*) return 1 ;; esac
+    [ -n "$_maj" ] && [ -n "$_min" ] || return 1
+    echo "$_maj $_min"
+}
+
+rclone_version_known() {
+    [ -n "$(rclone_version_parts)" ]
+}
+
+# rclone_at_least <mayor> <menor>: el binario es esa versión o una más nueva.
+rclone_at_least() {
+    set -- "$1" "$2" $(rclone_version_parts)
+    [ -n "$3" ] || return 1
+    [ "$3" -gt "$1" ] || { [ "$3" -eq "$1" ] && [ "$4" -ge "$2" ]; }
 }
 
 compute_mount_opts() {
@@ -98,6 +135,24 @@ compute_mount_opts() {
             MOUNT_OPTS="--vfs-cache-mode writes"
             ;;
     esac
+
+    # S3: en un bucket las carpetas no existen, solo son parte del nombre de los
+    # objetos, así que una carpeta vacía creada desde el explorador se perdía al
+    # desmontar. Con --s3-directory-markers rclone sube un objeto vacío
+    # "carpeta/" por cada carpeta nueva y la conserva. También permite montar
+    # una carpeta vacía del bucket. Requiere rclone 1.64+.
+    #
+    # OJO: es una opción del backend S3, y "rclone mount --help" solo lista las
+    # opciones de montaje/VFS, no las de los backends; buscarla ahí daba siempre
+    # "no existe" y la opción se omitía sin avisar. Se decide por la versión del
+    # binario y, si no se puede leer, con "rclone help flags".
+    if [ "$(remote_type "$ACTIVE")" = s3 ]; then
+        if rclone_at_least 1 64 || \
+           { ! rclone_version_known && \
+             "$MODDIR/bin/rclone" help flags directory-markers 2>&1 | grep -q -- '--s3-directory-markers'; }; then
+            MOUNT_OPTS="$MOUNT_OPTS --s3-directory-markers"
+        fi
+    fi
 
     # --vfs-read-chunk-streams solo existe desde rclone 1.67: si el binario
     # incluido es más viejo se quita, en vez de que el montaje falle por una

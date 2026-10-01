@@ -67,6 +67,7 @@ fun ServersScreen(vm: BindViewModel) {
             if (dualPane) {
                 val ftp = vm.profiles.filter { it.type == RemoteType.FTP }
                 val drive = vm.profiles.filter { it.type == RemoteType.DRIVE }
+                val s3 = vm.profiles.filter { it.type == RemoteType.S3 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(24.dp)
@@ -91,10 +92,20 @@ fun ServersScreen(vm: BindViewModel) {
                         onEdit = { p -> editTarget = p; showSheet = true },
                         onDelete = { deleteTarget = it }
                     )
+                    ServerPanel(
+                        modifier = Modifier.weight(1f),
+                        type = RemoteType.S3,
+                        emptyHint = "Conecta un bucket S3 (Oracle Cloud u otro compatible) para montarlo como carpeta.",
+                        profiles = s3,
+                        selected = vm.activeName,
+                        onSelect = { vm.selectProfile(it) },
+                        onEdit = { p -> editTarget = p; showSheet = true },
+                        onDelete = { deleteTarget = it }
+                    )
                 }
             } else if (vm.profiles.isEmpty()) {
                 Text(
-                    "Todavía no hay servidores guardados. Agrega un servidor FTP o tu Google Drive para montarlo como carpeta en tu almacenamiento.",
+                    "Todavía no hay servidores guardados. Agrega un servidor FTP, tu Google Drive o un bucket S3 para montarlo como carpeta en tu almacenamiento.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -134,6 +145,11 @@ fun ServersScreen(vm: BindViewModel) {
             },
             onSaveDrive = { name, token, options ->
                 vm.saveDriveProfile(editTarget?.name, name, token, options)
+                vm.cancelDriveLogin()
+                showSheet = false
+            },
+            onSaveS3 = { name, options, secret ->
+                vm.saveS3Profile(editTarget?.name, name, options, secret)
                 vm.cancelDriveLogin()
                 showSheet = false
             },

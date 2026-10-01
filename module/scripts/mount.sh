@@ -176,7 +176,12 @@ fi
 
 echo "$(date): opciones de montaje: $MOUNT_OPTS" >> "$LOG_FILE"
 
-"$RCLONE_BIN" mount "$ACTIVE:" "$RCLONE_MOUNTPOINT" \
+# S3: si el servidor tiene bucket (bind_path) se monta ese bucket y no la lista
+# de todos; útil cuando la cuenta no puede listar buckets (p. ej. Oracle).
+REMOTE_ROOT="$(remote_root "$ACTIVE")"
+echo "$(date): montando '$ACTIVE:$REMOTE_ROOT' (tipo $(remote_type "$ACTIVE"))" >> "$LOG_FILE"
+
+"$RCLONE_BIN" mount "$ACTIVE:$REMOTE_ROOT" "$RCLONE_MOUNTPOINT" \
     --config "$RCLONE_CONF" \
     --cache-dir "$CACHE_DIR" \
     --allow-other \
