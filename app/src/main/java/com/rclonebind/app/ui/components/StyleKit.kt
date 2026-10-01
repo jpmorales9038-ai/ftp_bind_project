@@ -311,6 +311,21 @@ object AppIcons {
             fill = SolidColor(OracleBrandRed)
         ).build()
     }
+
+    /** Logo de AWS para fondos claros (letras azul oscuro, sonrisa naranja). */
+    val AwsLogo: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        buildAwsLogo("AwsLogo", AwsBrandInk)
+    }
+
+    /** Logo de AWS para fondos oscuros (letras blancas, sonrisa naranja). */
+    val AwsLogoOnDark: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        buildAwsLogo("AwsLogoOnDark", Color.White)
+    }
+
+    /** Logo de Cloudflare: naranja, se lee igual sobre fondo claro y oscuro. */
+    val CloudflareLogo: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        buildCloudflareLogo("CloudflareLogo")
+    }
 }
 
 /**
@@ -318,7 +333,15 @@ object AppIcons {
  * dibuja con Image; false: es un icono de una sola tinta y se dibuja con Icon
  * (tomando el color del tema).
  */
-data class ServerIcon(val vector: ImageVector, val branded: Boolean)
+data class ServerIcon(
+    val vector: ImageVector,
+    val branded: Boolean,
+    /** Variante para fondos oscuros, si el logo de marca no se lee sobre ellos (AWS). */
+    val onDark: ImageVector? = null
+) {
+    /** El vector que se lee bien sobre un fondo claro u oscuro. */
+    fun forBackground(dark: Boolean): ImageVector = if (dark) onDark ?: vector else vector
+}
 
 /** El icono que identifica a [profile]: uno distinto por tipo de servidor y, en S3, por proveedor. */
 fun serverIconFor(profile: RemoteProfile): ServerIcon = when (profile.type) {
@@ -326,6 +349,8 @@ fun serverIconFor(profile: RemoteProfile): ServerIcon = when (profile.type) {
     RemoteType.DRIVE -> ServerIcon(AppIcons.DriveLogo, branded = true)
     RemoteType.S3 -> when (profile.s3Provider) {
         S3Provider.ORACLE -> ServerIcon(AppIcons.OracleLogo, branded = true)
+        S3Provider.AWS -> ServerIcon(AppIcons.AwsLogo, branded = true, onDark = AppIcons.AwsLogoOnDark)
+        S3Provider.CLOUDFLARE -> ServerIcon(AppIcons.CloudflareLogo, branded = true)
         else -> ServerIcon(AppIcons.Cloud, branded = false)
     }
 }

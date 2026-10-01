@@ -95,7 +95,7 @@ fun ServersScreen(vm: BindViewModel) {
                     ServerPanel(
                         modifier = Modifier.weight(1f),
                         type = RemoteType.S3,
-                        emptyHint = "Conecta un bucket S3 (Oracle Cloud u otro compatible) para montarlo como carpeta.",
+                        emptyHint = "Conecta un bucket S3 (Oracle Cloud, Amazon S3, Cloudflare R2 u otro compatible) para montarlo como carpeta.",
                         profiles = s3,
                         selected = vm.activeName,
                         onSelect = { vm.selectProfile(it) },

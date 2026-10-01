@@ -88,6 +88,8 @@ data class RemoteProfile(
  */
 enum class S3Provider(val label: String, private val hostSuffixes: List<String>) {
     ORACLE("Oracle Cloud", listOf(".oraclecloud.com")),
+    AWS("Amazon S3", listOf(".amazonaws.com", ".amazonaws.com.cn")),
+    CLOUDFLARE("Cloudflare R2", listOf(".r2.cloudflarestorage.com")),
     /** Cualquier otro servicio compatible con S3. */
     OTHER("Otro proveedor", emptyList());
 
@@ -105,6 +107,84 @@ enum class S3Provider(val label: String, private val hostSuffixes: List<String>)
 /** Proveedor del servidor S3, o null si no es de tipo S3. */
 val RemoteProfile.s3Provider: S3Provider?
     get() = s3?.let { S3Provider.fromEndpoint(it.endpoint) }
+
+/**
+ * Ajustes de rendimiento propios de S3 (Oracle Cloud y compatibles), cada uno
+ * en su archivo de config/ (los lee scripts/perf_opts.sh al montar). Un valor
+ * null significa "automático": el que corresponde al proveedor y al perfil
+ * (ver [S3Perf]).
+ */
+data class S3PerfSettings(
+    /** Trozos del mismo archivo que se leen a la vez (--vfs-read-chunk-streams). Solo en Máximo. */
+    val streams: Int? = null,
+    /** Partes de una subida multiparte a la vez (--s3-upload-concurrency). Solo en Máximo. */
+    val uploadConcurrency: Int? = null,
+    /** Tamaño de cada parte de subida en MB (--s3-chunk-size). Solo en Máximo. */
+    val chunkMb: Int? = null,
+    /** Evita peticiones HEAD y copias en el servidor (ver perf_opts.sh). */
+    val fewerRequests: Boolean? = null,
+    /** Minutos que se cachea cada listado de carpeta (--dir-cache-time). */
+    val dirCacheMin: Int? = null
+) {
+    val isCustom: Boolean
+        get() = streams != null || uploadConcurrency != null || chunkMb != null ||
+            fewerRequests != null || dirCacheMin != null
+}
+
+/**
+ * Rangos y valores automáticos del rendimiento de S3. Los automáticos deben
+ * coincidir con los de scripts/perf_opts.sh (s3_mount_opts).
+ */
+object S3Perf {
+    const val STREAMS_MIN = 1
+    const val STREAMS_MAX = 12
+    const val STREAMS_DEFAULT = 6
+
+    const val UPLOAD_CONC_MIN = 1
+    const val UPLOAD_CONC_MAX = 16
+    const val UPLOAD_CONC_DEFAULT = 6
+
+    val CHUNK_CHOICES_MB = listOf(8, 16, 32, 64)
+    const val CHUNK_DEFAULT_MB = 16
+
+    val DIR_CACHE_CHOICES_MIN = listOf(5, 10, 30, 60, 360)
+
+    /** --transfers que fija el perfil Máximo para S3. */
+    const val TRANSFERS = 4
+
+    /** Tope de RAM de subida: el script baja las partes simultáneas para no pasarlo. */
+    const val UPLOAD_RAM_CAP_MB = 768
+
+    /** Oracle y Cloudflare R2 facturan por número de peticiones (R2 tras un cupo gratis): recortan por defecto. */
+    fun defaultFewerRequests(provider: S3Provider): Boolean =
+        provider == S3Provider.ORACLE || provider == S3Provider.CLOUDFLARE
+
+    fun defaultDirCacheMin(provider: S3Provider, mode: PerfMode): Int = when {
+        provider == S3Provider.ORACLE || provider == S3Provider.CLOUDFLARE -> 30
+        mode == PerfMode.MAX -> 10
+        else -> 5
+    }
+
+    /**
+     * R2 da errores de firma en archivos grandes con mucha subida multiparte
+     * simultánea (reportado en rclone con 4 o más partes), así que arranca en 3.
+     */
+    fun defaultUploadConcurrency(provider: S3Provider): Int =
+        if (provider == S3Provider.CLOUDFLARE) 3 else UPLOAD_CONC_DEFAULT
+
+    /** Partes simultáneas que realmente se usan: las pedidas, bajadas hasta entrar en el tope de RAM. */
+    fun effectiveUploadConcurrency(requested: Int, chunkMb: Int): Int {
+        var c = requested
+        while (c > 1 && TRANSFERS * c * chunkMb > UPLOAD_RAM_CAP_MB) c--
+        return c
+    }
+
+    /** RAM de subida en el peor caso (MB): transfers x partes simultáneas x tamaño de parte. */
+    fun uploadRamMb(concurrency: Int, chunkMb: Int): Int = TRANSFERS * concurrency * chunkMb
+}
+
+/** "5 min", "1 h", "6 h". */
+fun formatMinutes(min: Int): String = if (min < 60) "$min min" else "${min / 60} h"
 
 /** Línea corta que identifica el servidor en tarjetas y en Inicio. */
 val RemoteProfile.subtitle: String
@@ -238,6 +318,67 @@ fun validateOracleNamespace(namespace: String): String? = when {
 fun validateOracleRegion(region: String): String? = when {
     region.isEmpty() -> "Escribe la región"
     !ORACLE_REGION.matches(region) -> "Formato de región, por ejemplo us-ashburn-1"
+    else -> null
+}
+
+// ---- Amazon S3 ----
+
+// Región de AWS: us-east-1, eu-west-3, ap-southeast-2, us-gov-west-1, cn-north-1...
+private val AWS_REGION = Regex("^[a-z]{2}(-[a-z]+)+-[0-9]+$")
+
+/**
+ * Endpoint regional de Amazon S3. Con provider=AWS rclone usa direccionamiento
+ * virtual-hosted (bucket.s3.región.amazonaws.com) por su cuenta; las regiones de
+ * China tienen otro dominio (.amazonaws.com.cn).
+ */
+fun awsEndpoint(region: String): String {
+    val r = region.trim()
+    val domain = if (r.startsWith("cn-")) "amazonaws.com.cn" else "amazonaws.com"
+    return "https://s3.$r.$domain"
+}
+
+fun validateAwsRegion(region: String): String? = when {
+    region.isEmpty() -> "Escribe la región del bucket"
+    !AWS_REGION.matches(region) -> "Formato de región, por ejemplo us-east-1"
+    else -> null
+}
+
+// ---- Cloudflare R2 ----
+
+// Account ID: 32 caracteres hexadecimales (panel de Cloudflare > R2 > Resumen).
+private val CF_ACCOUNT_ID = Regex("^[0-9a-fA-F]{32}$")
+
+// Host de la API S3 de R2. La jurisdicción (eu, fedramp) va entre el ID y "r2":
+//   <id>.r2.cloudflarestorage.com, <id>.eu.r2.cloudflarestorage.com...
+private val CF_HOST =
+    Regex("^([0-9a-f]{32})(\\.(?:eu|fedramp))?\\.r2\\.cloudflarestorage\\.com$")
+
+/** Solo el host de lo pegado: sin esquema, ruta, consulta ni puerto, en minúsculas. */
+private fun hostOnly(raw: String): String =
+    raw.trim().lowercase().substringAfter("://").substringBefore("/").substringBefore("?").substringBefore(":")
+
+/**
+ * Endpoint de R2 a partir de lo escrito en el campo: el Account ID (se arma
+ * https://<id>.r2.cloudflarestorage.com) o el endpoint/host completo, que es la
+ * forma de conservar una jurisdicción (UE, FedRAMP). Null si no es ninguna.
+ */
+fun cloudflareEndpoint(input: String): String? {
+    val t = input.trim()
+    if (CF_ACCOUNT_ID.matches(t)) return "https://${t.lowercase()}.r2.cloudflarestorage.com"
+    val host = hostOnly(t)
+    return if (CF_HOST.matches(host)) "https://$host" else null
+}
+
+/** Lo que muestra el campo al editar: el Account ID, o el host entero si lleva jurisdicción. */
+fun cloudflareFieldValue(endpoint: String): String? {
+    val host = hostOnly(endpoint)
+    val m = CF_HOST.matchEntire(host) ?: return null
+    return if (m.groupValues[2].isEmpty()) m.groupValues[1] else host
+}
+
+fun validateCloudflareAccount(input: String): String? = when {
+    input.isBlank() -> "Escribe el Account ID"
+    cloudflareEndpoint(input) == null -> "Debe ser el Account ID (32 caracteres) o el endpoint de R2"
     else -> null
 }
 

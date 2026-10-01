@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -49,6 +50,8 @@ import com.rclonebind.app.root.CACHE_GB_MAX
 import com.rclonebind.app.root.CACHE_GB_MIN
 import com.rclonebind.app.root.PerfMode
 import com.rclonebind.app.root.RemoteType
+import com.rclonebind.app.root.S3Provider
+import com.rclonebind.app.root.s3Provider
 import com.rclonebind.app.root.subtitle
 import com.rclonebind.app.root.defaultCacheGb
 import com.rclonebind.app.root.formatCacheKb
@@ -57,6 +60,7 @@ import com.rclonebind.app.ui.components.FolderPickerDialog
 import com.rclonebind.app.ui.components.OptionTile
 import com.rclonebind.app.ui.components.PerfTestSheet
 import com.rclonebind.app.ui.components.ScreenContainer
+import com.rclonebind.app.ui.components.S3PerfSection
 import com.rclonebind.app.ui.components.SectionCard
 import com.rclonebind.app.ui.components.rememberIsDualPane
 import com.rclonebind.app.ui.components.serverIconFor
@@ -282,7 +286,12 @@ private fun MountCard(
                 if (selected != null) {
                     val icon = serverIconFor(selected)
                     if (icon.branded) {
-                        Image(icon.vector, contentDescription = null, modifier = Modifier.size(20.dp))
+                        // Logos con letras oscuras (AWS) tienen variante para fondo oscuro.
+                        Image(
+                            icon.forBackground(scheme.surface.luminance() < 0.5f),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
                     } else {
                         Icon(
                             icon.vector,
@@ -461,13 +470,20 @@ private fun PerfCard(
                 steps = CACHE_GB_MAX - CACHE_GB_MIN - 1
             )
             Text(
-                "Aplica a Google Drive y a FTP en modo Máximo. En Máximo se dejan 2 GB libres para no llenar el almacenamiento.",
+                "Aplica a Google Drive, S3 y FTP en modo Máximo. En Máximo se dejan 2 GB libres para no llenar el almacenamiento.",
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant
             )
             if (custom != null) {
                 TextButton(onClick = { vm.setCacheGb(null) }) { Text("Restablecer tamaño automático") }
             }
+        }
+
+        // Opciones dedicadas cuando el servidor elegido es S3 (Oracle u otro
+        // compatible): ver S3PerfSection.
+        vm.profiles.firstOrNull { it.name == vm.activeName && it.type == RemoteType.S3 }?.let { s3 ->
+            HorizontalDivider()
+            S3PerfSection(vm, s3.s3Provider ?: S3Provider.OTHER)
         }
 
         FilledTonalButton(

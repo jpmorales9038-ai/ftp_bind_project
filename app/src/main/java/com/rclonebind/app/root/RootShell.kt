@@ -17,6 +17,12 @@ object ModulePaths {
     const val PERF_FILE = "$CONFIG_DIR/perf"
     const val CACHE_GB_FILE = "$CONFIG_DIR/cache_gb"
     const val RAM_CACHE_FILE = "$CONFIG_DIR/ram_cache"
+    /** Ajustes de rendimiento de S3 (nombres dentro de CONFIG_DIR; los lee scripts/perf_opts.sh). */
+    const val S3_STREAMS = "s3_streams"
+    const val S3_UPLOAD_CONC = "s3_upload_conc"
+    const val S3_CHUNK_MB = "s3_chunk_mb"
+    const val S3_FEWER_REQ = "s3_fewer_req"
+    const val S3_DIR_CACHE_MIN = "s3_dir_cache_min"
     const val STATUS_FILE = "$BASE/status.json"
     const val LOG_FILE = "$BASE/mount.log"
     /** Progreso de la precarga de assets (lo escribe scripts/preload.sh). */
@@ -239,16 +245,27 @@ object RootShell {
 
         val section = LinkedHashMap<String, String>()
         section["type"] = RemoteType.S3.rclone
-        // "Other" = cualquier S3 compatible con endpoint propio (direccionamiento
-        // por ruta). Si el usuario ya puso otro proveedor a mano, se respeta.
-        section["provider"] = old?.get("provider") ?: "Other"
+        // AWS necesita provider=AWS (direccionamiento virtual-hosted y reglas
+        // propias de Amazon) y R2 provider=Cloudflare (rclone ajusta por su
+        // cuenta lo que R2 no soporta). Oracle y el resto de servicios
+        // compatibles usan "Other" (endpoint propio, direccionamiento por
+        // ruta). Si el usuario ya puso a mano otro proveedor conocido, se
+        // respeta; el "AWS" o "Cloudflare" viejo de un servidor que dejó de
+        // ser de esos se cambia a "Other".
+        val oldProvider = old?.get("provider")
+        section["provider"] = when (S3Provider.fromEndpoint(options.endpoint)) {
+            S3Provider.AWS -> "AWS"
+            S3Provider.CLOUDFLARE -> "Cloudflare"
+            else -> if (oldProvider.isNullOrEmpty() || oldProvider == "AWS" || oldProvider == "Cloudflare") "Other" else oldProvider
+        }
         section["env_auth"] = old?.get("env_auth") ?: "false"
         section["access_key_id"] = options.accessKeyId
         section["secret_access_key"] = finalSecret
         if (options.region.isNotEmpty()) section["region"] = options.region
         section["endpoint"] = options.endpoint
-        // No intentar crear el bucket al escribir: en Oracle la clave suele
-        // no tener permiso de crear buckets y rclone fallaría al subir.
+        // No intentar crear el bucket al escribir: en Oracle, en AWS (usuario
+        // IAM acotado a un bucket) y en R2 (token con permisos solo de objetos)
+        // la clave suele no poder crear buckets y rclone fallaría al subir.
         section["no_check_bucket"] = old?.get("no_check_bucket") ?: "true"
         if (options.bucket.isNotEmpty()) section["bind_path"] = options.bucket
         if (old != null) {
@@ -331,6 +348,45 @@ object RootShell {
     fun setRamCache(enabled: Boolean): Result =
         if (enabled) run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '1' > ${ModulePaths.RAM_CACHE_FILE}")
         else run("rm -f ${ModulePaths.RAM_CACHE_FILE}")
+
+    // ---- Rendimiento de S3 (un archivo por ajuste; ausente = automático) ----
+
+    fun readS3Perf(): S3PerfSettings {
+        // "archivo:valor" por cada archivo que existe y no está vacío.
+        val values = Shell.cmd(
+            "cd ${ModulePaths.CONFIG_DIR} 2>/dev/null && grep -s -H . " +
+                "${ModulePaths.S3_STREAMS} ${ModulePaths.S3_UPLOAD_CONC} ${ModulePaths.S3_CHUNK_MB} " +
+                "${ModulePaths.S3_FEWER_REQ} ${ModulePaths.S3_DIR_CACHE_MIN}"
+        ).exec().out
+            .mapNotNull { line ->
+                val i = line.indexOf(':')
+                if (i <= 0) null else line.substring(0, i) to line.substring(i + 1).trim()
+            }
+            .toMap()
+        fun int(file: String, range: IntRange) = values[file]?.toIntOrNull()?.takeIf { it in range }
+        return S3PerfSettings(
+            streams = int(ModulePaths.S3_STREAMS, S3Perf.STREAMS_MIN..S3Perf.STREAMS_MAX),
+            uploadConcurrency = int(ModulePaths.S3_UPLOAD_CONC, S3Perf.UPLOAD_CONC_MIN..S3Perf.UPLOAD_CONC_MAX),
+            chunkMb = values[ModulePaths.S3_CHUNK_MB]?.toIntOrNull()?.takeIf { it in S3Perf.CHUNK_CHOICES_MB },
+            fewerRequests = when (values[ModulePaths.S3_FEWER_REQ]) {
+                "1" -> true
+                "0" -> false
+                else -> null
+            },
+            dirCacheMin = int(ModulePaths.S3_DIR_CACHE_MIN, 1..1440)
+        )
+    }
+
+    /** Con [value] null se borra el archivo y el ajuste vuelve a automático. */
+    fun setS3PerfValue(file: String, value: Int?): Result =
+        if (value == null) run("rm -f ${ModulePaths.CONFIG_DIR}/$file")
+        else run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' $value > ${ModulePaths.CONFIG_DIR}/$file")
+
+    fun resetS3Perf(): Result =
+        run(
+            "cd ${ModulePaths.CONFIG_DIR} && rm -f ${ModulePaths.S3_STREAMS} ${ModulePaths.S3_UPLOAD_CONC} " +
+                "${ModulePaths.S3_CHUNK_MB} ${ModulePaths.S3_FEWER_REQ} ${ModulePaths.S3_DIR_CACHE_MIN}"
+        )
 
     // ---- Prueba de rendimiento ----
 

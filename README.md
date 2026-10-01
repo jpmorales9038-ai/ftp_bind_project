@@ -19,7 +19,7 @@
   <img alt="Material 3" src="https://img.shields.io/badge/Material%203-6750A4?style=flat-square&logo=materialdesign&logoColor=white">
 </p>
 
-<h3 align="center">Monta servidores FTP, Google Drive y buckets S3 (Oracle Cloud y compatibles) como una carpeta más de tu almacenamiento interno.<br>Cualquier app puede usarlos, sin configurar nada en cada una.</h3>
+<h3 align="center">Monta servidores FTP, Google Drive y buckets S3 (Oracle Cloud, Amazon S3, Cloudflare R2 y compatibles) como una carpeta más de tu almacenamiento interno.<br>Cualquier app puede usarlos, sin configurar nada en cada una.</h3>
 
 ---
 
@@ -29,7 +29,7 @@
 flowchart LR
     A["Servidor FTP"] --> R
     B["Google Drive"] --> R
-    S["Bucket S3 / Oracle"] --> R
+    S["Bucket S3 / Oracle / R2"] --> R
     R["rclone mount<br/>(FUSE)"] --> M["mount --bind"]
     M --> C["/sdcard/FTP<br/>o la carpeta que elijas"]
     C --> D["Galería"]
@@ -66,7 +66,7 @@ sequenceDiagram
 
 - Cada servidor es una tarjeta; la seleccionada se abre y las demás asoman su franja.
 - Tocar una tarjeta elige cuál se monta. Agregar, editar y eliminar desde la misma pantalla.
-- Compatible con **FTP**, **Google Drive** y **S3** (Oracle Cloud Object Storage y cualquier servicio compatible).
+- Compatible con **FTP**, **Google Drive** y **S3** (Oracle Cloud Object Storage, Amazon S3, Cloudflare R2 y cualquier servicio compatible).
 - En pantalla ancha (apaisado, tablets) se ven **dos paneles uno al lado del otro**, uno por tipo de remoto; en vertical siguen mezclados en una sola pila, como siempre.
 - Las contraseñas se guardan ofuscadas con `rclone obscure`.
 - Al editar, dejar la contraseña vacía conserva la anterior.
@@ -80,13 +80,35 @@ sequenceDiagram
 
 ### S3 y Oracle Cloud Object Storage
 
-- En **Nuevo servidor > S3** eliges **Oracle Cloud** (namespace + región; el endpoint `https://<namespace>.compat.objectstorage.<región>.oraclecloud.com` se arma solo) u **Otro proveedor** (endpoint propio: MinIO, Wasabi, R2, B2...).
+- En **Nuevo servidor > S3** eliges **Oracle Cloud** (namespace + región; el endpoint `https://<namespace>.compat.objectstorage.<región>.oraclecloud.com` se arma solo) u **Otro proveedor** (endpoint propio: MinIO, Wasabi, B2...).
 - Se inicia sesión con una clave de acceso: en Oracle, una **Customer Secret Key** (Perfil > Mi perfil > Claves secretas de cliente). La clave secreta solo existe en `rclone.conf` (chmod 600).
 - **Bucket** opcional (`bucket` o `bucket/carpeta`): se monta solo ese. Vacío monta la lista de buckets, pero Oracle exige permisos de listado; si tu clave no los tiene, escribe el bucket.
 - Al guardar, lista el bucket con la clave para confirmar endpoint, región, permisos y red, y traduce los errores típicos (`SignatureDoesNotMatch`, `AccessDenied`, `NoSuchBucket`...).
-- **Icono por proveedor:** cada proveedor S3 tiene su propio icono (Oracle Cloud lleva su logo; los demás, una nube genérica). El proveedor se detecta por el dominio del endpoint (`S3Provider` en `Conf.kt`); para agregar uno nuevo basta una entrada del enum con los sufijos de su dominio y su icono en `serverIconFor` (`StyleKit.kt`).
+- **Icono por proveedor:** cada proveedor S3 tiene su propio icono (Oracle Cloud, Amazon S3 y Cloudflare R2 llevan su logo; los demás, una nube genérica). El proveedor se detecta por el dominio del endpoint (`S3Provider` en `Conf.kt`); para agregar uno nuevo basta una entrada del enum con los sufijos de su dominio y su icono en `serverIconFor` (`StyleKit.kt`).
 - **Carpetas vacías:** se monta con `--s3-directory-markers` (rclone 1.64+): al crear una carpeta desde el explorador rclone sube un objeto vacío `carpeta/`, así se conserva aunque no tenga archivos y se puede montar vacía.
+- **Rendimiento de S3 / Oracle:** al elegir un servidor S3, la tarjeta **Rendimiento** de Inicio suma sus propias opciones (`S3PerfSection`; se aplican al volver a montar; cada una puede quedar en automático):
+  - **Menos peticiones** (automático: sí en Oracle y Cloudflare R2, no en otros): `--use-server-modtime`, `--s3-no-head` y `--s3-no-head-object`. Evita un HEAD por archivo para leer su fecha (clave al listar o precargar miles de archivos) y las copias en el servidor que hacía rclone tras cada subida. Contrapartida: la fecha de modificación pasa a ser la de subida.
+  - **Listados en caché** (5 min a 6 h; automático: 30 min en Oracle y R2, 10 min en Máximo y 5 min en Equilibrado para los demás): S3 no avisa de cambios hechos fuera del montaje, así que es lo que tarda en verse un archivo subido por otra vía.
+  - Solo en **Máximo**: **lectura paralela** (1 a 12 trozos del mismo archivo, `--vfs-read-chunk-streams`, 6 por defecto), **subida paralela** (1 a 16 partes, `--s3-upload-concurrency`, 6 por defecto; 3 en Cloudflare R2) y **tamaño de parte** (8, 16, 32 o 64 MB, `--s3-chunk-size`, 16 por defecto). La RAM de subida en el peor caso es 4 transferencias × partes × tamaño; si pasa de 768 MB, el script baja las partes simultáneas y la tarjeta lo avisa. Con *menos peticiones* desactivado, los archivos de más de una parte se suben en paralelo (`--s3-upload-cutoff`); activado, suben de una vez hasta 200 MB.
+  - Las opciones del backend se añaden solo si el binario de rclone las conoce (`rclone help flags`). Los ajustes viven en `config/s3_*` y el cálculo está en `scripts/perf_opts.sh` (`s3_mount_opts`), compartido con la prueba de rendimiento.
 - El bucket se guarda en la clave propia `bind_path` de la sección; rclone la ignora y la leen `mount.sh` y `check_remote.sh`.
+
+### Amazon S3
+
+- En **Nuevo servidor > S3 > Proveedor** elige **Amazon S3** y escribe solo la **región del bucket** (por ejemplo `us-east-1`): el endpoint `https://s3.<región>.amazonaws.com` se arma solo (`.amazonaws.com.cn` en las regiones de China) y el remoto se guarda con `provider = AWS`.
+- Se inicia sesión con una **clave de acceso de IAM** (Credenciales de seguridad > Crear clave de acceso) de un usuario con permisos sobre el bucket. Como en Oracle, se recomienda escribir el **bucket** (`bucket` o `bucket/carpeta`).
+- Si la región no es la del bucket, al guardar la comprobación avisa «la región no es la del bucket».
+- Mismas opciones de rendimiento que el resto de S3, pero por defecto **sin** recortar peticiones (Oracle sí): el listado se cachea 5 min en Equilibrado y 10 min en Máximo.
+- Su tarjeta usa el naranja de AWS (seleccionada: fondo naranja con texto y logo en azul oscuro) y el logo cambia de variante según el fondo: letras azules sobre fondo claro y blancas sobre fondo oscuro.
+
+### Cloudflare R2
+
+- En **Nuevo servidor > S3 > Proveedor** elige **Cloudflare R2** y escribe solo el **Account ID** (32 caracteres, panel de Cloudflare > R2 > Resumen): el endpoint `https://<id>.r2.cloudflarestorage.com` se arma solo, la región es siempre `auto` y el remoto se guarda con `provider = Cloudflare`.
+- Si tu bucket es de una **jurisdicción** (UE, FedRAMP), pega el endpoint completo (`https://<id>.eu.r2.cloudflarestorage.com`) en el mismo campo: se conserva tal cual. Al editar, el campo muestra el Account ID, o el host entero en ese caso.
+- Se inicia sesión con un **token de API de R2** (R2 > Administrar tokens de API) con permiso de lectura y escritura de objetos: te da la **Access Key ID** y la **Secret Access Key**. Se recomienda escribir el **bucket**; un token acotado a un bucket no puede listarlos todos (por eso se guarda con `no_check_bucket = true`).
+- Por defecto recorta peticiones (R2 cobra por operación pasado su cupo gratis) y cachea los listados 30 min, como Oracle. La **subida paralela** arranca en **3 partes** en vez de 6: R2 puede dar errores de firma en archivos grandes con 4 o más partes a la vez. Se puede cambiar a mano en la tarjeta Rendimiento.
+- Su tarjeta usa el naranja de Cloudflare (seleccionada: fondo naranja con texto y logo en gris oscuro, porque el blanco no da contraste sobre ese naranja). El logo está trazado en vector a partir del PNG del icono (`CloudflareLogo.kt`), con sus cuatro tonos.
+- Un servidor creado antes como «Otro proveedor» con un endpoint `*.r2.cloudflarestorage.com` se reconoce solo como R2 (tarjeta, icono y rendimiento); al volver a guardarlo se actualiza a `provider = Cloudflare`.
 
 ### Google Drive sin PC
 
