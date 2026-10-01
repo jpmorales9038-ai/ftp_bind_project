@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.ui.theme.AppMotion
 import kotlinx.coroutines.isActive
+import kotlin.math.PI
+import kotlin.math.cos
 
 /**
  * Espacio inferior que ocupa la barra flotante. Las pantallas lo suman a su
@@ -190,14 +192,39 @@ fun ScreenContainer(
 private const val TopFadeRestAlpha = 0.45f
 
 /**
+ * Puntos del degradado: plano y casi opaco durante el título (para que no
+ * compita con las palabras) y después una caída en coseno, suave, hasta
+ * transparente. Antes eran 5 puntos con saltos grandes entre sí (de 0.85 a
+ * 0.4, y de ahí a 0): visualmente eso se ve como una línea dura en vez de un
+ * degradado, más todavía encima del degradado propio de la primera tarjeta.
+ * Con el tramo final dividido en muchos pasos de una curva coseno (en vez de
+ * pocos pasos lineales) el ojo ya no distingue los escalones.
+ */
+private fun topFadeStops(fade: Color, titleFraction: Float): Array<Pair<Float, Color>> {
+    val plateauAlpha = 0.9f
+    val plateau = arrayOf(
+        0f to fade.copy(alpha = 1f),
+        (titleFraction * 0.6f) to fade.copy(alpha = 0.97f),
+        titleFraction to fade.copy(alpha = plateauAlpha)
+    )
+    val tailSteps = 7
+    val tail = Array(tailSteps) { i ->
+        val u = (i + 1) / tailSteps.toFloat() // sin el 0: ya lo cubre el plateau de arriba
+        val eased = 0.5f * (1f + cos(PI.toFloat() * u)) // 1 en u=0, 0 en u=1, suave en el medio
+        val pos = titleFraction + (1f - titleFraction) * u
+        pos to fade.copy(alpha = plateauAlpha * eased)
+    }
+    return plateau + tail
+}
+
+/**
  * Difuminado de la barra del título: mismo degradado que el de la barra de
- * gestos pero espejado y más opaco detrás del título, de opaco arriba a
- * transparente abajo. Cubre TODA la barra (título y acciones) más una franja
- * extra por debajo, así lo que pasa por detrás de las palabras también se
- * funde. Nunca baja de [TopFadeRestAlpha] (para que el título siempre se lea
- * bien) y crece desde ahí hasta completo tras recorrer [rampPx] de
- * desplazamiento. El alpha se lee dentro de graphicsLayer: se anima sin
- * recomponer. No intercepta toques.
+ * gestos pero espejado y más opaco detrás del título. Cubre TODA la barra
+ * (título y acciones) más una franja extra por debajo, así lo que pasa por
+ * detrás de las palabras también se funde. Nunca baja de [TopFadeRestAlpha]
+ * (para que el título siempre tenga algo de fondo) y crece desde ahí hasta
+ * completo tras recorrer [rampPx] de desplazamiento. El alpha se lee dentro
+ * de graphicsLayer: se anima sin recomponer. No intercepta toques.
  */
 @Composable
 private fun TopFade(scrollState: ScrollState, rampPx: Float, titleFraction: Float) {
@@ -209,18 +236,7 @@ private fun TopFade(scrollState: ScrollState, rampPx: Float, titleFraction: Floa
                 val scrolled = (scrollState.value / rampPx).coerceIn(0f, 1f)
                 alpha = TopFadeRestAlpha + (1f - TopFadeRestAlpha) * scrolled
             }
-            .background(
-                // Detrás del título (y los botones) casi opaco, para que el
-                // contenido no compita con las palabras; el degradado real
-                // ocurre en la franja de debajo de la barra.
-                Brush.verticalGradient(
-                    0f to fade.copy(alpha = 1f),
-                    titleFraction * 0.7f to fade.copy(alpha = 0.97f),
-                    titleFraction to fade.copy(alpha = 0.85f),
-                    titleFraction + (1f - titleFraction) * 0.5f to fade.copy(alpha = 0.4f),
-                    1f to Color.Transparent
-                )
-            )
+            .background(Brush.verticalGradient(*topFadeStops(fade, titleFraction)))
     )
 }
 
