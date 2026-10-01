@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -285,7 +286,12 @@ private fun MountCard(
                 if (selected != null) {
                     val icon = serverIconFor(selected)
                     if (icon.branded) {
-                        Image(icon.vector, contentDescription = null, modifier = Modifier.size(20.dp))
+                        // Logos con letras oscuras (AWS) tienen variante para fondo oscuro.
+                        Image(
+                            icon.forBackground(scheme.surface.luminance() < 0.5f),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
                     } else {
                         Icon(
                             icon.vector,

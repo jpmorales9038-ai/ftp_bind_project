@@ -284,10 +284,12 @@ class BindViewModel : ViewModel() {
                 "la clave de acceso no existe"
             "AccessDenied" in output || "403" in output ->
                 "sin permiso: revisa las políticas de la clave y del bucket"
+            "PermanentRedirect" in output || "AuthorizationHeaderMalformed" in output ->
+                "la región no es la del bucket"
             "NoSuchBucket" in output || "directory not found" in output ->
-                "el bucket no existe en ese namespace/región"
+                "el bucket no existe (revisa su nombre y la región o el namespace)"
             "no such host" in output || "lookup" in output ->
-                "no se resuelve el endpoint: revisa namespace y región"
+                "no se resuelve el endpoint: revisa la región, el namespace o el endpoint"
             else -> null
         }
         return if (hint != null) "$hint ($last)" else last

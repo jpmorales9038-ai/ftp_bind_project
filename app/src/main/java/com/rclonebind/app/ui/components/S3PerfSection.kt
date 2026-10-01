@@ -48,14 +48,22 @@ fun S3PerfSection(vm: BindViewModel, provider: S3Provider) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                if (provider == S3Provider.ORACLE) "Opciones de Oracle Cloud" else "Opciones de S3",
+                when (provider) {
+                    S3Provider.ORACLE -> "Opciones de Oracle Cloud"
+                    S3Provider.AWS -> "Opciones de Amazon S3"
+                    S3Provider.OTHER -> "Opciones de S3"
+                },
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
-                if (provider == S3Provider.ORACLE) {
-                    "Oracle factura y limita por número de peticiones según el plan, así que por defecto se recortan."
-                } else {
-                    "Valores para cualquier servicio compatible con S3."
+                when (provider) {
+                    S3Provider.ORACLE ->
+                        "Oracle factura y limita por número de peticiones según el plan, así que por defecto se recortan."
+                    S3Provider.AWS ->
+                        "Amazon S3 aguanta mucho paralelismo y cobra una fracción por cada mil peticiones, " +
+                            "así que por defecto no se recortan; puedes activarlo si quieres gastar menos."
+                    S3Provider.OTHER ->
+                        "Valores para cualquier servicio compatible con S3."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant

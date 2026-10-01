@@ -84,7 +84,7 @@ sequenceDiagram
 - Se inicia sesión con una clave de acceso: en Oracle, una **Customer Secret Key** (Perfil > Mi perfil > Claves secretas de cliente). La clave secreta solo existe en `rclone.conf` (chmod 600).
 - **Bucket** opcional (`bucket` o `bucket/carpeta`): se monta solo ese. Vacío monta la lista de buckets, pero Oracle exige permisos de listado; si tu clave no los tiene, escribe el bucket.
 - Al guardar, lista el bucket con la clave para confirmar endpoint, región, permisos y red, y traduce los errores típicos (`SignatureDoesNotMatch`, `AccessDenied`, `NoSuchBucket`...).
-- **Icono por proveedor:** cada proveedor S3 tiene su propio icono (Oracle Cloud lleva su logo; los demás, una nube genérica). El proveedor se detecta por el dominio del endpoint (`S3Provider` en `Conf.kt`); para agregar uno nuevo basta una entrada del enum con los sufijos de su dominio y su icono en `serverIconFor` (`StyleKit.kt`).
+- **Icono por proveedor:** cada proveedor S3 tiene su propio icono (Oracle Cloud y Amazon S3 llevan su logo; los demás, una nube genérica). El proveedor se detecta por el dominio del endpoint (`S3Provider` en `Conf.kt`); para agregar uno nuevo basta una entrada del enum con los sufijos de su dominio y su icono en `serverIconFor` (`StyleKit.kt`).
 - **Carpetas vacías:** se monta con `--s3-directory-markers` (rclone 1.64+): al crear una carpeta desde el explorador rclone sube un objeto vacío `carpeta/`, así se conserva aunque no tenga archivos y se puede montar vacía.
 - **Rendimiento de S3 / Oracle:** al elegir un servidor S3, la tarjeta **Rendimiento** de Inicio suma sus propias opciones (`S3PerfSection`; se aplican al volver a montar; cada una puede quedar en automático):
   - **Menos peticiones** (automático: sí en Oracle, no en otros): `--use-server-modtime`, `--s3-no-head` y `--s3-no-head-object`. Evita un HEAD por archivo para leer su fecha (clave al listar o precargar miles de archivos) y las copias en el servidor que hacía rclone tras cada subida. Contrapartida: la fecha de modificación pasa a ser la de subida.
@@ -92,6 +92,14 @@ sequenceDiagram
   - Solo en **Máximo**: **lectura paralela** (1 a 12 trozos del mismo archivo, `--vfs-read-chunk-streams`, 6 por defecto), **subida paralela** (1 a 16 partes, `--s3-upload-concurrency`, 6 por defecto) y **tamaño de parte** (8, 16, 32 o 64 MB, `--s3-chunk-size`, 16 por defecto). La RAM de subida en el peor caso es 4 transferencias × partes × tamaño; si pasa de 768 MB, el script baja las partes simultáneas y la tarjeta lo avisa. Con *menos peticiones* desactivado, los archivos de más de una parte se suben en paralelo (`--s3-upload-cutoff`); activado, suben de una vez hasta 200 MB.
   - Las opciones del backend se añaden solo si el binario de rclone las conoce (`rclone help flags`). Los ajustes viven en `config/s3_*` y el cálculo está en `scripts/perf_opts.sh` (`s3_mount_opts`), compartido con la prueba de rendimiento.
 - El bucket se guarda en la clave propia `bind_path` de la sección; rclone la ignora y la leen `mount.sh` y `check_remote.sh`.
+
+### Amazon S3
+
+- En **Nuevo servidor > S3 > Proveedor** elige **Amazon S3** y escribe solo la **región del bucket** (por ejemplo `us-east-1`): el endpoint `https://s3.<región>.amazonaws.com` se arma solo (`.amazonaws.com.cn` en las regiones de China) y el remoto se guarda con `provider = AWS`.
+- Se inicia sesión con una **clave de acceso de IAM** (Credenciales de seguridad > Crear clave de acceso) de un usuario con permisos sobre el bucket. Como en Oracle, se recomienda escribir el **bucket** (`bucket` o `bucket/carpeta`).
+- Si la región no es la del bucket, al guardar la comprobación avisa «la región no es la del bucket».
+- Mismas opciones de rendimiento que el resto de S3, pero por defecto **sin** recortar peticiones (Oracle sí): el listado se cachea 5 min en Equilibrado y 10 min en Máximo.
+- Su tarjeta usa el naranja de AWS (seleccionada: fondo naranja con texto y logo en azul oscuro) y el logo cambia de variante según el fondo: letras azules sobre fondo claro y blancas sobre fondo oscuro.
 
 ### Google Drive sin PC
 

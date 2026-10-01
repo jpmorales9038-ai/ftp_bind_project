@@ -56,10 +56,12 @@ import com.rclonebind.app.root.RemoteProfile
 import com.rclonebind.app.root.RemoteType
 import com.rclonebind.app.root.S3Options
 import com.rclonebind.app.root.S3Provider
+import com.rclonebind.app.root.awsEndpoint
 import com.rclonebind.app.root.cleanS3Bucket
 import com.rclonebind.app.root.cleanS3Endpoint
 import com.rclonebind.app.root.oracleEndpoint
 import com.rclonebind.app.root.parseOracleEndpoint
+import com.rclonebind.app.root.validateAwsRegion
 import com.rclonebind.app.root.validateOracleNamespace
 import com.rclonebind.app.root.validateOracleRegion
 import com.rclonebind.app.root.validateS3Bucket
@@ -125,11 +127,14 @@ fun ServerSheet(
     var newToken by remember { mutableStateOf<String?>(null) }
     var driveError by remember { mutableStateOf<String?>(null) }
 
-    // Estado de S3. Con Oracle Cloud basta namespace + región (el endpoint se
-    // arma solo); "Otro proveedor" deja escribir el endpoint completo.
+    // Estado de S3. Con Oracle Cloud basta namespace + región y con Amazon S3 solo
+    // la región (el endpoint se arma solo); "Otro proveedor" deja escribir el
+    // endpoint completo.
     val initialS3 = initial?.s3
     val initialOracle = initialS3?.endpoint?.let { parseOracleEndpoint(it) }
-    var s3Oracle by remember { mutableStateOf(initialS3 == null || initialOracle != null) }
+    var s3Prov by remember {
+        mutableStateOf(initialS3?.let { S3Provider.fromEndpoint(it.endpoint) } ?: S3Provider.ORACLE)
+    }
     var s3Namespace by remember { mutableStateOf(initialOracle?.first.orEmpty()) }
     var s3Region by remember { mutableStateOf(initialS3?.region.orEmpty()) }
     var s3Endpoint by remember {
@@ -368,11 +373,16 @@ fun ServerSheet(
             } else if (type == RemoteType.S3) {
                 // ---- S3 / Oracle Cloud Object Storage ----
                 Text(
-                    if (s3Oracle) {
-                        "Oracle Cloud: usa una «Customer Secret Key» (Perfil > Mi perfil > " +
-                            "Claves secretas de cliente). El namespace está en Administración del inquilino."
-                    } else {
-                        "Cualquier servicio compatible con S3 (MinIO, Wasabi, Backblaze B2, Cloudflare R2...)."
+                    when (s3Prov) {
+                        S3Provider.ORACLE ->
+                            "Oracle Cloud: usa una «Customer Secret Key» (Perfil > Mi perfil > " +
+                                "Claves secretas de cliente). El namespace está en Administración del inquilino."
+                        S3Provider.AWS ->
+                            "Amazon S3: usa una clave de acceso de IAM (Credenciales de seguridad > " +
+                                "Crear clave de acceso) de un usuario con permisos sobre el bucket. " +
+                                "La región es la del bucket."
+                        S3Provider.OTHER ->
+                            "Cualquier servicio compatible con S3 (MinIO, Wasabi, Backblaze B2, Cloudflare R2...)."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -381,18 +391,22 @@ fun ServerSheet(
                     label = "Proveedor",
                     options = listOf(
                         SelectorOption(
-                            true, S3Provider.ORACLE.label, "Object Storage (API compatible con S3)",
+                            S3Provider.ORACLE, S3Provider.ORACLE.label, "Object Storage (API compatible con S3)",
                             AppIcons.OracleLogo, branded = true
                         ),
                         SelectorOption(
-                            false, S3Provider.OTHER.label, "MinIO, Wasabi, Backblaze B2, Cloudflare R2...",
+                            S3Provider.AWS, S3Provider.AWS.label, "Amazon Web Services",
+                            AppIcons.AwsLogo, branded = true
+                        ),
+                        SelectorOption(
+                            S3Provider.OTHER, S3Provider.OTHER.label, "MinIO, Wasabi, Backblaze B2, Cloudflare R2...",
                             AppIcons.Cloud
                         )
                     ),
-                    selected = s3Oracle,
-                    onSelect = { s3Oracle = it }
+                    selected = s3Prov,
+                    onSelect = { s3Prov = it }
                 )
-                if (s3Oracle) {
+                if (s3Prov == S3Provider.ORACLE) {
                     OutlinedTextField(
                         value = s3Namespace,
                         onValueChange = { s3Namespace = it.trim(); s3NamespaceError = null },
@@ -411,6 +425,20 @@ fun ServerSheet(
                         singleLine = true,
                         isError = s3RegionError != null,
                         supportingText = s3RegionError?.let { { Text(it) } },
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else if (s3Prov == S3Provider.AWS) {
+                    OutlinedTextField(
+                        value = s3Region,
+                        onValueChange = { s3Region = it.trim(); s3RegionError = null },
+                        label = { Text("Región del bucket") },
+                        placeholder = { Text("us-east-1") },
+                        singleLine = true,
+                        isError = s3RegionError != null,
+                        supportingText = {
+                            Text(s3RegionError ?: "Es la región donde se creó el bucket; se ve en la consola de S3.")
+                        },
                         shape = MaterialTheme.shapes.large,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -677,11 +705,17 @@ fun ServerSheet(
                     } else if (type == RemoteType.S3) {
                         val endpoint: String
                         val region: String
-                        if (s3Oracle) {
+                        if (s3Prov == S3Provider.ORACLE) {
                             s3NamespaceError = validateOracleNamespace(s3Namespace.trim())
                             s3RegionError = validateOracleRegion(s3Region.trim())
                             endpoint = oracleEndpoint(s3Namespace, s3Region)
                             region = s3Region.trim()
+                            s3EndpointError = null
+                        } else if (s3Prov == S3Provider.AWS) {
+                            region = s3Region.trim()
+                            s3RegionError = validateAwsRegion(region)
+                            endpoint = awsEndpoint(region)
+                            s3NamespaceError = null
                             s3EndpointError = null
                         } else {
                             endpoint = cleanS3Endpoint(s3Endpoint)

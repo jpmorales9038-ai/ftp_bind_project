@@ -88,6 +88,7 @@ data class RemoteProfile(
  */
 enum class S3Provider(val label: String, private val hostSuffixes: List<String>) {
     ORACLE("Oracle Cloud", listOf(".oraclecloud.com")),
+    AWS("Amazon S3", listOf(".amazonaws.com", ".amazonaws.com.cn")),
     /** Cualquier otro servicio compatible con S3. */
     OTHER("Otro proveedor", emptyList());
 
@@ -308,6 +309,28 @@ fun validateOracleNamespace(namespace: String): String? = when {
 fun validateOracleRegion(region: String): String? = when {
     region.isEmpty() -> "Escribe la región"
     !ORACLE_REGION.matches(region) -> "Formato de región, por ejemplo us-ashburn-1"
+    else -> null
+}
+
+// ---- Amazon S3 ----
+
+// Región de AWS: us-east-1, eu-west-3, ap-southeast-2, us-gov-west-1, cn-north-1...
+private val AWS_REGION = Regex("^[a-z]{2}(-[a-z]+)+-[0-9]+$")
+
+/**
+ * Endpoint regional de Amazon S3. Con provider=AWS rclone usa direccionamiento
+ * virtual-hosted (bucket.s3.región.amazonaws.com) por su cuenta; las regiones de
+ * China tienen otro dominio (.amazonaws.com.cn).
+ */
+fun awsEndpoint(region: String): String {
+    val r = region.trim()
+    val domain = if (r.startsWith("cn-")) "amazonaws.com.cn" else "amazonaws.com"
+    return "https://s3.$r.$domain"
+}
+
+fun validateAwsRegion(region: String): String? = when {
+    region.isEmpty() -> "Escribe la región del bucket"
+    !AWS_REGION.matches(region) -> "Formato de región, por ejemplo us-east-1"
     else -> null
 }
 

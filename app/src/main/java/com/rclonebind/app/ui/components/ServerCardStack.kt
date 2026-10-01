@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -112,6 +113,7 @@ private fun StackCard(
     val scheme = MaterialTheme.colorScheme
     val isDrive = profile.type == RemoteType.DRIVE
     val isOracle = profile.s3Provider == S3Provider.ORACLE
+    val isAws = profile.s3Provider == S3Provider.AWS
     val container = when {
         // Perfiles de Drive: color de marca propio y fijo, no la paleta
         // rotativa por posición que usan los demás perfiles.
@@ -121,6 +123,10 @@ private fun StackCard(
         // naranja pleno; sin seleccionar, una versión tenue del mismo tono.
         isOracle && isSelected -> OracleBrandRed
         isOracle -> OracleBrandRed.copy(alpha = 0.16f).compositeOver(scheme.surfaceContainerHighest)
+        // AWS: igual, con su naranja. Seleccionada es el naranja pleno (con
+        // texto y logo en azul oscuro); sin seleccionar, una versión tenue.
+        isAws && isSelected -> AwsBrandOrange
+        isAws -> AwsBrandOrange.copy(alpha = 0.16f).compositeOver(scheme.surfaceContainerHighest)
         isSelected -> scheme.primary
         else -> when (index % 3) {
             0 -> scheme.secondaryContainer
@@ -133,6 +139,8 @@ private fun StackCard(
         isDrive -> scheme.onSurface
         isOracle && isSelected -> Color.White
         isOracle -> scheme.onSurface
+        isAws && isSelected -> AwsBrandInk
+        isAws -> scheme.onSurface
         isSelected -> scheme.onPrimary
         else -> when (index % 3) {
             0 -> scheme.onSecondaryContainer
@@ -163,11 +171,20 @@ private fun StackCard(
                 if (icon.branded) {
                     // El logo de Oracle es del mismo naranja que la tarjeta
                     // seleccionada: sobre ella se dibuja en blanco (tinte que
-                    // conserva el hueco del óvalo) para que no desaparezca.
+                    // conserva el hueco del óvalo) para que no desaparezca. El
+                    // de AWS, igual: su sonrisa es del naranja de la tarjeta,
+                    // así que sobre ella todo el logo va en azul oscuro. Sin
+                    // seleccionar, AWS usa la variante de letras blancas si el
+                    // fondo es oscuro (las letras azules no se verían).
+                    val tint: Color? = when {
+                        isOracle && isSelected -> Color.White
+                        isAws && isSelected -> AwsBrandInk
+                        else -> null
+                    }
                     Image(
-                        icon.vector,
+                        icon.forBackground(container.luminance() < 0.5f),
                         contentDescription = null,
-                        colorFilter = if (isOracle && isSelected) ColorFilter.tint(Color.White) else null,
+                        colorFilter = tint?.let { ColorFilter.tint(it) },
                         modifier = Modifier.size(iconSize)
                     )
                 } else if (profile.type == RemoteType.S3) {
