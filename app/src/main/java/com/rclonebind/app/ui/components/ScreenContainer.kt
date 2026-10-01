@@ -168,7 +168,7 @@ fun ScreenContainer(
             // fija con scroll propio y un degradado la taparía.
             val fadeExtraPx = fadeExtra.roundToPx()
             val fade = if (scroll && title != null) {
-                subcompose("fade") { TopFade(scrollState, fadeExtraPx.toFloat(), titleH.toFloat() / (titleH + fadeExtraPx)) }
+                subcompose("fade") { TopFade(scrollState, fadeExtraPx.toFloat()) }
                     .map { it.measure(Constraints.fixed(w, titleH + fadeExtraPx)) }
             } else emptyList()
 
@@ -192,42 +192,36 @@ fun ScreenContainer(
 private const val TopFadeRestAlpha = 0.45f
 
 /**
- * Puntos del degradado: plano y casi opaco durante el título (para que no
- * compita con las palabras) y después una caída en coseno, suave, hasta
- * transparente. Antes eran 5 puntos con saltos grandes entre sí (de 0.85 a
- * 0.4, y de ahí a 0): visualmente eso se ve como una línea dura en vez de un
- * degradado, más todavía encima del degradado propio de la primera tarjeta.
- * Con el tramo final dividido en muchos pasos de una curva coseno (en vez de
- * pocos pasos lineales) el ojo ya no distingue los escalones.
+ * Puntos del degradado: una sola curva en coseno de punta a punta, de opaco
+ * arriba a transparente abajo. Antes había un tramo plano y casi opaco
+ * durante todo el título (para no competir con las palabras) y recién
+ * después empezaba a cablear; visualmente eso dejaba a la palabra del título
+ * siempre sobre el mismo fondo fijo, sin que el difuminado la atravesara de
+ * verdad. Ahora la curva pasa por encima de todo el título también: puede
+ * oscurecer algo más la parte de arriba de la barra, pero el degradado se ve
+ * continuo en vez de tener un tramo fijo y después un escalón.
  */
-private fun topFadeStops(fade: Color, titleFraction: Float): Array<Pair<Float, Color>> {
-    val plateauAlpha = 0.9f
-    val plateau = arrayOf(
-        0f to fade.copy(alpha = 1f),
-        (titleFraction * 0.6f) to fade.copy(alpha = 0.97f),
-        titleFraction to fade.copy(alpha = plateauAlpha)
-    )
-    val tailSteps = 7
-    val tail = Array(tailSteps) { i ->
-        val u = (i + 1) / tailSteps.toFloat() // sin el 0: ya lo cubre el plateau de arriba
+private fun topFadeStops(fade: Color): Array<Pair<Float, Color>> {
+    val steps = 10
+    return Array(steps + 1) { i ->
+        val u = i / steps.toFloat()
         val eased = 0.5f * (1f + cos(PI.toFloat() * u)) // 1 en u=0, 0 en u=1, suave en el medio
-        val pos = titleFraction + (1f - titleFraction) * u
-        pos to fade.copy(alpha = plateauAlpha * eased)
+        u to fade.copy(alpha = eased)
     }
-    return plateau + tail
 }
 
 /**
  * Difuminado de la barra del título: mismo degradado que el de la barra de
- * gestos pero espejado y más opaco detrás del título. Cubre TODA la barra
- * (título y acciones) más una franja extra por debajo, así lo que pasa por
- * detrás de las palabras también se funde. Nunca baja de [TopFadeRestAlpha]
- * (para que el título siempre tenga algo de fondo) y crece desde ahí hasta
+ * gestos pero espejado y más opaco arriba. Cubre TODA la barra (título y
+ * acciones) más una franja extra por debajo, y la curva recorre esa altura
+ * entera: también pasa por detrás de la palabra del título (que se sigue
+ * dibujando encima, siempre nítida). Nunca baja de [TopFadeRestAlpha] (para
+ * que el título siempre tenga algo de fondo) y crece desde ahí hasta
  * completo tras recorrer [rampPx] de desplazamiento. El alpha se lee dentro
  * de graphicsLayer: se anima sin recomponer. No intercepta toques.
  */
 @Composable
-private fun TopFade(scrollState: ScrollState, rampPx: Float, titleFraction: Float) {
+private fun TopFade(scrollState: ScrollState, rampPx: Float) {
     val fade = MaterialTheme.colorScheme.background
     Box(
         Modifier
@@ -236,7 +230,7 @@ private fun TopFade(scrollState: ScrollState, rampPx: Float, titleFraction: Floa
                 val scrolled = (scrollState.value / rampPx).coerceIn(0f, 1f)
                 alpha = TopFadeRestAlpha + (1f - TopFadeRestAlpha) * scrolled
             }
-            .background(Brush.verticalGradient(*topFadeStops(fade, titleFraction)))
+            .background(Brush.verticalGradient(*topFadeStops(fade)))
     )
 }
 
