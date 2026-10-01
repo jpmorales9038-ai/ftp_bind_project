@@ -6,7 +6,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,8 +22,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -229,25 +226,25 @@ fun ServerSheet(
             )
 
             if (initial == null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    RemoteType.entries.forEach { option ->
-                        OptionTile(
-                            label = option.label,
-                            icon = when (option) {
-                                RemoteType.FTP -> AppIcons.Dns
-                                RemoteType.DRIVE -> AppIcons.DriveLogo
-                                RemoteType.S3 -> AppIcons.Cloud
-                            },
-                            selected = type == option,
-                            onClick = { type = option },
-                            brandIcon = option == RemoteType.DRIVE,
-                            modifier = Modifier.weight(1f)
+                DropdownSelector(
+                    label = "Tipo de servidor",
+                    options = listOf(
+                        SelectorOption(
+                            RemoteType.FTP, "FTP", "Servidor en tu red o en internet",
+                            AppIcons.Dns
+                        ),
+                        SelectorOption(
+                            RemoteType.DRIVE, "Google Drive", "Tu cuenta de Google",
+                            AppIcons.DriveLogo, branded = true
+                        ),
+                        SelectorOption(
+                            RemoteType.S3, "S3", "Oracle Cloud y otros compatibles",
+                            AppIcons.Cloud
                         )
-                    }
-                }
+                    ),
+                    selected = type,
+                    onSelect = { type = it }
+                )
             }
 
             OutlinedTextField(
@@ -380,24 +377,21 @@ fun ServerSheet(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = s3Oracle,
-                        onClick = { s3Oracle = true },
-                        label = { Text(S3Provider.ORACLE.label) },
-                        leadingIcon = {
-                            Image(AppIcons.OracleLogo, contentDescription = null, modifier = Modifier.size(18.dp))
-                        }
-                    )
-                    FilterChip(
-                        selected = !s3Oracle,
-                        onClick = { s3Oracle = false },
-                        label = { Text(S3Provider.OTHER.label) },
-                        leadingIcon = {
-                            Icon(AppIcons.Cloud, contentDescription = null, modifier = Modifier.size(18.dp))
-                        }
-                    )
-                }
+                DropdownSelector(
+                    label = "Proveedor",
+                    options = listOf(
+                        SelectorOption(
+                            true, S3Provider.ORACLE.label, "Object Storage (API compatible con S3)",
+                            AppIcons.OracleLogo, branded = true
+                        ),
+                        SelectorOption(
+                            false, S3Provider.OTHER.label, "MinIO, Wasabi, Backblaze B2, Cloudflare R2...",
+                            AppIcons.Cloud
+                        )
+                    ),
+                    selected = s3Oracle,
+                    onSelect = { s3Oracle = it }
+                )
                 if (s3Oracle) {
                     OutlinedTextField(
                         value = s3Namespace,
