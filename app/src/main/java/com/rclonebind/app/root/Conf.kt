@@ -462,6 +462,10 @@ fun validateTargetPath(path: String): String? = when {
     path.isEmpty() -> "Escribe una ruta"
     !path.startsWith("/") -> "Debe ser una ruta absoluta (empieza con /)"
     path == "/" -> "No uses la raíz del sistema"
-    path.contains("..") -> "La ruta no puede contener \"..\""
+    path.any { it.isISOControl() || it == '"' || it == '\\' } -> "La ruta contiene caracteres no admitidos"
+    path.contains("//") -> "La ruta no puede contener barras duplicadas"
+    listOf("/sdcard/", "/storage/emulated/0/", "/storage/self/primary/", "/data/media/0/")
+        .none { path.startsWith(it) && path.length > it.length } -> "Elige una subcarpeta del almacenamiento interno"
+    path.split('/').any { it == ".." || it == "." } -> "La ruta no puede contener segmentos . o .."
     else -> null
 }

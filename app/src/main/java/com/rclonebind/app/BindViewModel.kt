@@ -492,20 +492,23 @@ class BindViewModel : ViewModel() {
         val current = mountedRemote
         val onlyUnmounting = mounted && (current == null || current == target)
         busy = true
-        val result = withContext(Dispatchers.IO) {
-            when {
-                onlyUnmounting -> RootShell.unmount()
-                mounted -> {
-                    // Hay otro servidor montado: se desmonta y se monta el seleccionado.
-                    RootShell.unmount()
-                    RootShell.mount()
+        val result = try {
+            withContext(Dispatchers.IO) {
+                when {
+                    onlyUnmounting -> RootShell.unmount()
+                    mounted -> {
+                        val stopped = RootShell.unmount()
+                        if (stopped.success) RootShell.mount() else stopped
+                    }
+                    else -> RootShell.mount()
                 }
-                else -> RootShell.mount()
+            }.also {
+                message = if (it.success) null else "Error: ${it.output.takeLast(300)}"
+                reload()
             }
+        } finally {
+            busy = false
         }
-        message = if (result.success) null else "Error: ${result.output.takeLast(200)}"
-        reload()
-        busy = false
 
         // mount.sh ya lanzó la precarga sola en segundo plano (ver
         // preload.sh). Se la sigue desde ya en vez de esperar a que algo
@@ -579,8 +582,9 @@ class BindViewModel : ViewModel() {
     }
 
     fun setAutostart(enabled: Boolean) = viewModelScope.launch {
-        autostart = enabled
-        withContext(Dispatchers.IO) { RootShell.setAutostart(enabled) }
+        val result = withContext(Dispatchers.IO) { RootShell.setAutostart(enabled) }
+        if (result.success) autostart = enabled
+        else message = "No se pudo guardar el inicio automático: ${result.output.take(200)}"
     }
 
     fun refreshLogs() = viewModelScope.launch {
@@ -602,8 +606,11 @@ class BindViewModel : ViewModel() {
         }
         if (busy) return@launch
         busy = true
-        val result = withContext(Dispatchers.IO) { RootShell.clearCache() }
-        busy = false
+        val result = try {
+            withContext(Dispatchers.IO) { RootShell.clearCache() }
+        } finally {
+            busy = false
+        }
         message = if (result.success) {
             val kb = result.output.trim().removePrefix("OK").trim().toLongOrNull() ?: 0L
             cacheKb = 0L

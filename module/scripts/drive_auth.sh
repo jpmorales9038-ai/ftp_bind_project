@@ -13,9 +13,8 @@ SELF="$(readlink -f "$0")"
 MODDIR=$(dirname "$(dirname "$SELF")")
 
 # Mismo namespace global que mount.sh, para ver los mismos archivos de sistema.
-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
-fi
+. "$MODDIR/scripts/common.sh"
+enter_global_namespace "$@"
 
 . "$MODDIR/scripts/env.sh"
 
@@ -24,10 +23,6 @@ rm -f "$OUT"
 umask 077
 : > "$OUT"
 
-# Tope de 5 minutos por si el usuario abandona el navegador.
-LIMIT=""
-command -v timeout >/dev/null 2>&1 && LIMIT="timeout 300"
-
-# $LIMIT sin comillas a propósito (es un prefijo opcional).
-$LIMIT "$MODDIR/bin/rclone" authorize drive "$@" --auth-no-open-browser >> "$OUT" 2>&1
+# Deadline works even on Android builds without timeout.
+run_timeout 300 "$MODDIR/bin/rclone" authorize drive "$@" --auth-no-open-browser >> "$OUT" 2>&1
 echo "__EXIT:$?" >> "$OUT"

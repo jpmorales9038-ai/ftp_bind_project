@@ -1,5 +1,11 @@
 #!/system/bin/sh
 MODDIR=${0%/*}
+umask 077
+# Boot-only recovery: no processes from the previous boot can own these.
+rm -rf "$MODDIR/operation.lock" "$MODDIR/preload.lock" "$MODDIR/perf_test.lock"
+rm -f "$MODDIR/watch.pid"
+chmod 700 "$MODDIR/config" 2>/dev/null
+chmod 600 "$MODDIR/config/"* 2>/dev/null
 
 while [ "$(getprop sys.boot_completed)" != "1" ]; do
     sleep 1
@@ -21,13 +27,14 @@ if [ -f "$NEEDS_MANUAL" ] && [ -f "$APK_SRC" ]; then
     . "$MODDIR/scripts/install_app.sh"
     cp "$APK_SRC" "$APK_TMP"
     chmod 644 "$APK_TMP"
-    if ! install_app "$APK_TMP" "$INSTALL_LOG"; then
+    if install_app "$APK_TMP" "$INSTALL_LOG"; then
+        rm -f "$NEEDS_MANUAL" "$APK_TMP"
+    else
         am start -a android.intent.action.VIEW \
             -d "file://$APK_TMP" \
             -t application/vnd.android.package-archive \
             -f 0x10000000 >> "$INSTALL_LOG" 2>&1
     fi
-    rm -f "$NEEDS_MANUAL"
 fi
 
 AUTOSTART_FLAG="$MODDIR/config/autostart"

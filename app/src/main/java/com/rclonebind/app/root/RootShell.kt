@@ -58,7 +58,7 @@ object RootShell {
 
     fun unmount(): Result = run("sh ${ModulePaths.SCRIPTS}/unmount.sh")
 
-    fun status(): Result = run("cat ${ModulePaths.STATUS_FILE} 2>/dev/null || echo '{\"mounted\":false}'")
+    fun status(): Result = run("sh ${ModulePaths.SCRIPTS}/status.sh")
 
     // ---- Precarga de assets (perfil Máximo / Drive): ver scripts/preload.sh ----
 
@@ -69,7 +69,7 @@ object RootShell {
      * comprobar el remoto tras agregar archivos nuevos.
      *
      * Espera hasta 5s (en segundo plano, sin bloquear esta llamada) a que
-     * esa corrida anterior suelte su candado de verdad antes de borrarlo y
+     * esa corrida anterior suelte su candado de verdad antes de
      * lanzar la nueva: borrarlo sin esperar podía dejar la precarga nueva
      * pisando archivos temporales a medio limpiar de la vieja y terminando
      * con 0 archivos seleccionados (ver el mismo ajuste en mount.sh).
@@ -83,14 +83,14 @@ object RootShell {
     fun preloadStart(): Result = run(
         "pkill -f ${ModulePaths.SCRIPTS}/preload.sh 2>/dev/null; " +
             "( i=0; while [ -d ${ModulePaths.BASE}/preload.lock ] && [ \"\$i\" -lt 5 ]; do sleep 1; i=\$((i + 1)); done; " +
-            "rm -rf ${ModulePaths.BASE}/preload.lock; " +
-            "nohup sh ${ModulePaths.SCRIPTS}/preload.sh force >/dev/null 2>&1 ) &"
+            "[ -d ${ModulePaths.BASE}/preload.lock ] && exit 1; " +
+            "nohup sh ${ModulePaths.SCRIPTS}/preload.sh force </dev/null >/dev/null 2>&1 ) </dev/null >/dev/null 2>&1 &"
     )
 
     fun preloadStatus(): String =
         Shell.cmd("cat ${ModulePaths.PRELOAD_STATUS_FILE} 2>/dev/null").exec().out.joinToString("\n")
 
-    fun tailLog(lines: Int = 200): Result = run("tail -n $lines ${ModulePaths.LOG_FILE} 2>/dev/null")
+    fun tailLog(lines: Int = 200): Result = run("tail -n ${lines.coerceIn(1, 2000)} ${ModulePaths.LOG_FILE} 2>/dev/null")
 
     /**
      * Vacía el log sin borrar el archivo: rclone lo mantiene abierto en modo
@@ -102,17 +102,26 @@ object RootShell {
     // ---- Servidores (una sección [nombre] por servidor en rclone.conf) ----
 
     private fun readConf(): Conf {
-        val out = Shell.cmd("cat ${ModulePaths.RCLONE_CONF} 2>/dev/null").exec().out
-        return parseConf(out.joinToString("\n"))
+        val result = Shell.cmd("if [ -e ${ModulePaths.RCLONE_CONF} ]; then cat ${ModulePaths.RCLONE_CONF}; fi").exec()
+        check(result.isSuccess) { "No se pudo leer la configuración; no se sobrescribe" }
+        return parseConf(result.out.joinToString("\n"))
     }
 
-    private fun writeConf(conf: Conf): Result =
-        run(
-            "mkdir -p ${ModulePaths.CONFIG_DIR} && " +
+    private fun writeConf(conf: Conf): Result {
+        for ((name, values) in conf) {
+            validateProfileName(name, name, emptyList())?.let { return Result(false, it) }
+            if (values.any { (k, v) ->
+                    k.isBlank() || k.any { it == '=' || it == '[' || it == ']' || it.isISOControl() } ||
+                        v.any { it.isISOControl() }
+                }) return Result(false, "La configuración contiene caracteres de control no admitidos")
+        }
+        return run(
+            "umask 077; mkdir -p ${ModulePaths.CONFIG_DIR} && chmod 700 ${ModulePaths.CONFIG_DIR} && " +
                 "printf '%s' ${sq(serializeConf(conf))} > ${ModulePaths.RCLONE_CONF}.tmp && " +
                 "chmod 600 ${ModulePaths.RCLONE_CONF}.tmp && " +
                 "mv ${ModulePaths.RCLONE_CONF}.tmp ${ModulePaths.RCLONE_CONF}"
         )
+    }
 
     fun loadProfiles(): List<RemoteProfile> = readConf().toProfiles()
 
@@ -121,6 +130,7 @@ object RootShell {
      * distinto es un renombrado). Con [pass] vacío al editar se conserva la
      * contraseña que ya estaba guardada.
      */
+    @Synchronized
     fun saveProfile(original: String?, name: String, host: String, port: String, user: String, pass: String): Result {
         val conf = readConf()
         if (name != original && conf.containsKey(name)) {
@@ -138,7 +148,7 @@ object RootShell {
             // cifrado). stderr va a /dev/null porque la app mezcla stderr con
             // stdout; se toma la última línea no vacía y se valida el formato
             // (base64url de IV de 16 bytes + datos => mínimo 22 caracteres).
-            val obscure = Shell.cmd("${ModulePaths.BIN} obscure ${sq(pass)} 2>/dev/null").exec()
+            val obscure = Shell.cmd("printf '%s' ${sq(pass)} | ${ModulePaths.BIN} obscure - 2>/dev/null").exec()
             if (!obscure.isSuccess) {
                 return Result(false, "No se pudo ofuscar la contraseña: " + obscure.out.joinToString("\n"))
             }
@@ -190,6 +200,7 @@ object RootShell {
      * Crea o edita un remoto Google Drive. Con [token] null al editar se
      * conserva la sesión que ya estaba guardada.
      */
+    @Synchronized
     fun saveDriveProfile(original: String?, name: String, token: String?, options: DriveOptions): Result {
         val conf = readConf()
         if (name != original && conf.containsKey(name)) {
@@ -232,6 +243,7 @@ object RootShell {
      * ya guardada. A diferencia de la contraseña FTP, rclone espera la clave
      * secreta de S3 en claro (no ofuscada); el archivo queda con chmod 600.
      */
+    @Synchronized
     fun saveS3Profile(original: String?, name: String, options: S3Options, secret: String): Result {
         val conf = readConf()
         if (name != original && conf.containsKey(name)) {
@@ -276,6 +288,7 @@ object RootShell {
         return writeConf(putSection(conf, original, name, section))
     }
 
+    @Synchronized
     fun deleteProfile(name: String): Result {
         val conf = readConf()
         conf.remove(name)
@@ -310,14 +323,16 @@ object RootShell {
             .joinToString("").trim().ifEmpty { null }
 
     fun setActive(name: String): Result =
-        run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(name)} > ${ModulePaths.ACTIVE_FILE}")
+        writePerfValue(ModulePaths.ACTIVE_FILE, name)
 
     fun readTargetPath(): String =
         Shell.cmd("cat ${ModulePaths.TARGET_PATH_FILE} 2>/dev/null").exec().out
             .joinToString("").trim().ifEmpty { DEFAULT_TARGET_PATH }
 
-    fun setTargetPath(path: String): Result =
-        run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(path)} > ${ModulePaths.TARGET_PATH_FILE}")
+    fun setTargetPath(path: String): Result {
+        validateTargetPath(path)?.let { return Result(false, it) }
+        return writePerfValue(ModulePaths.TARGET_PATH_FILE, path)
+    }
 
     fun readPerfMode(): PerfMode {
         val v = Shell.cmd("cat ${ModulePaths.PERF_FILE} 2>/dev/null").exec().out.joinToString("").trim()
@@ -325,7 +340,7 @@ object RootShell {
     }
 
     private fun writePerfValue(path: String, value: String): Result = run(
-        "mkdir -p ${ModulePaths.CONFIG_DIR} && " +
+        "umask 077; mkdir -p ${ModulePaths.CONFIG_DIR} && chmod 700 ${ModulePaths.CONFIG_DIR} && " +
             "printf '%s' ${sq(value)} > $path.tmp && mv -f $path.tmp $path"
     )
 
@@ -429,7 +444,7 @@ object RootShell {
             .joinToString("").trim() == "1"
 
     fun setAutostart(enabled: Boolean): Result =
-        run("mkdir -p ${ModulePaths.CONFIG_DIR} && echo '${if (enabled) "1" else "0"}' > ${ModulePaths.CONFIG_DIR}/autostart")
+        writePerfValue("${ModulePaths.CONFIG_DIR}/autostart", if (enabled) "1" else "0")
 
     // ---- Caché en disco de rclone ----
 

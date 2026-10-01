@@ -3,9 +3,8 @@ SELF="$(readlink -f "$0")"
 MODDIR=$(dirname "$(dirname "$SELF")")
 
 # Debe correr en el namespace global (PID 1), igual que mount.sh.
-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
-fi
+. "$MODDIR/scripts/common.sh"
+enter_global_namespace "$@"
 
 LOG_FILE="$MODDIR/mount.log"
 STATUS_FILE="$MODDIR/status.json"
@@ -34,15 +33,18 @@ while :; do
         exit 0
     fi
 
-    a="$(stat -c %d "$T" 2>/dev/null)"
-    b="$(stat -c %d "$RCLONE_MOUNTPOINT" 2>/dev/null)"
+    a="$(run_timeout 3 stat -c %d "$T" 2>/dev/null)"
+    b="$(run_timeout 3 stat -c %d "$RCLONE_MOUNTPOINT" 2>/dev/null)"
     if [ -n "$b" ] && [ "$a" != "$b" ]; then
         # Registra qué app estaba en primer plano: sirve para identificar
         # quién quita el bind.
         FOCUS="$(dumpsys window 2>/dev/null | grep -m1 mCurrentFocus)"
         echo "$(date): watcher: el bind en $T desapareció; foco: $FOCUS" >> "$LOG_FILE"
+        if ! mkdir "$MODDIR/operation.lock" 2>/dev/null; then sleep 5; continue; fi
+        grep -q '"mounted":true' "$STATUS_FILE" || { rmdir "$MODDIR/operation.lock"; exit 0; }
         err="$(mount --bind "$RCLONE_MOUNTPOINT" "$T" 2>&1)" || \
             echo "$(date): watcher: rebind falló: $err" >> "$LOG_FILE"
+        rmdir "$MODDIR/operation.lock" 2>/dev/null
     fi
-    sleep 1
+    sleep 5
 done

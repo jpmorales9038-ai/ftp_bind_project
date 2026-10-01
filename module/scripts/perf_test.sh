@@ -20,9 +20,8 @@ MODDIR=$(dirname "$(dirname "$SELF")")
 
 # Debe correr en el namespace global (PID 1), igual que mount.sh: así ve el bind
 # tal como lo ve el resto del sistema.
-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
-fi
+. "$MODDIR/scripts/common.sh"
+enter_global_namespace "$@"
 
 OUT="$MODDIR/perf_test.out"
 STATUS_FILE="$MODDIR/status.json"
@@ -41,10 +40,11 @@ TEST_MB=32
 WORST=OK
 TDIR=""
 
+mkdir "$MODDIR/perf_test.lock" 2>/dev/null || exit 1
 : > "$OUT"
 
 # Si la app corta la prueba a la mitad no debe quedar el archivo temporal.
-cleanup() { [ -n "$TDIR" ] && rm -rf "$TDIR" 2>/dev/null; }
+cleanup() { [ -n "$TDIR" ] && rm -rf "$TDIR" 2>/dev/null; rmdir "$MODDIR/perf_test.lock" 2>/dev/null; }
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 
@@ -71,11 +71,13 @@ finish() {
 }
 
 # Milisegundos. Si el date del sistema no soporta %N se cae a segundos.
+# Keep times below 2^31 for Android mksh. Test deadlines are well below
+# the ~11 day modulus; a boundary crossing is reported as an invalid sample.
 now_ms() {
     n="$(date +%s%N 2>/dev/null)"
     case "$n" in
-        ''|*[!0-9]*) echo $(( $(date +%s) * 1000 )) ;;
-        *) echo "${n%??????}" ;;
+        ''|*[!0-9]*) date +%s | awk '{printf "%.0f\n", ($1 % 1000000) * 1000}' ;;
+        *) printf '%s\n' "$n" | awk '{printf "%.0f\n", int(($1 / 1000000) % 1000000000)}' ;;
     esac
 }
 
@@ -92,7 +94,7 @@ fmt10() { echo "$(( $1 / 10 )).$(( $1 % 10 ))"; }
 tmo() {
     s="$1"
     shift
-    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi
+    run_timeout "$s" "$@"
 }
 
 # KB que ocupa la caché de rclone en disco.
@@ -299,22 +301,25 @@ else
     step list OK "$N1 elementos. Primer listado $L1 ms, segundo $L2 ms."
 fi
 
-# ---------------------------------------------------------------- write
+# ----------------------------------------------------------------- write
 step write RUN "Escribiendo $TEST_MB MB de prueba"
-TDIR="$T/.rclone-bind-test"
+TDIR="$T/.rclone-bind-test-$$"
 WS=""
 RS=""
-if ! mkdir -p "$TDIR" 2>/dev/null; then
+if [ "$CACHE_IS_RAM" = 1 ] || [ "$(remote_key "$REMOTE" scope)" = drive.readonly ]; then
+    step write SKIP "Montaje de solo lectura; no se escriben temporales."
+    TDIR=""
+elif ! mkdir "$TDIR" 2>/dev/null; then
     step write WARN "No se pudo crear la carpeta de prueba (¿servidor de solo lectura?). Se omite la escritura."
 else
     t0=$(now_ms)
-    dd if=/dev/zero of="$TDIR/w.bin" bs=1048576 count=$TEST_MB 2>/dev/null
+    tmo 60 dd if=/dev/zero of="$TDIR/w.bin" bs=1048576 count=$TEST_MB 2>/dev/null
     rc=$?
     t1=$(now_ms)
-    dd if="$TDIR/w.bin" of=/dev/null bs=1048576 2>/dev/null
+    tmo 60 dd if="$TDIR/w.bin" of=/dev/null bs=1048576 2>/dev/null
     t2=$(now_ms)
     SZ="$(stat -c %s "$TDIR/w.bin" 2>/dev/null)"
-    # Se borra enseguida: así el archivo no llega a subirse a la nube.
+    # Limpieza rápida: no garantiza que el backend no haya visto el temporal.
     rm -rf "$TDIR" 2>/dev/null
     TDIR=""
     if [ "$rc" != 0 ] || [ "$SZ" != $(( TEST_MB * 1048576 )) ]; then
@@ -379,7 +384,6 @@ fi
 # allocation): medir con du -sk justo después de leer casi siempre da 0
 # aunque la caché SÍ esté funcionando. "sync" fuerza el writeback pendiente
 # antes de medir (no afecta la velocidad reportada: se mide antes de esto).
-sync
 sleep 1
 C1=$(cache_kb)
 

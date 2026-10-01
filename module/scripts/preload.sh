@@ -20,12 +20,11 @@
 # entran en el presupuesto se decide antes, en un solo hilo, para que repartir
 # el trabajo entre los workers no tenga condiciones de carrera.
 #
-# No repite trabajo ya hecho: si la caché sigue en disco (no en RAM, que se
-# pierde al desmontar), conserva casi todo su tamaño y el remoto tiene la misma
-# cantidad de archivos y el mismo tamaño total que la última precarga
-# completa, se omite. clear_cache.sh
-# borra esta marca al vaciar la caché, así que un remonte tras limpiarla
-# vuelve a precargar todo.
+# Comprueba siempre los archivos seleccionados: cantidad/tamaño total no
+# prueban que el contenido siga igual. Una entrada válida en VFS se sirve
+# desde la caché sin volver a descargar, según las comprobaciones de rclone.
+# Los nombres con saltos de línea todavía no están soportados por las listas
+# de rutas de este script; evita usarlos en los remotos destinados a precarga.
 #
 # Respeta el tamaño de caché configurado (deja 512 MB de margen) y tiene
 # topes de tiempo y de cantidad de archivos por seguridad, para no quedarse
@@ -44,25 +43,19 @@ SELF="$(readlink -f "$0")"
 MODDIR=$(dirname "$(dirname "$SELF")")
 FORCE="$1"
 
-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
-fi
+. "$MODDIR/scripts/common.sh"
+enter_global_namespace "$@"
 
 LOG_FILE="$MODDIR/mount.log"
 STATUS_FILE="$MODDIR/status.json"
 RCLONE_CONF="$MODDIR/config/rclone.conf"
 PRELOAD_STATUS="$MODDIR/preload_status.json"
 
-# Restos de una corrida anterior que no terminó bien (el móvil se reinició a
-# la mitad, por ejemplo). No son el candado: ese se trata aparte.
-rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
-      "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done 2>/dev/null
-
-# Tamaño de un archivo en MB enteros. Se calcula con awk y no con $(( )): el
+# Tamaño de un archivo en MB, redondeado hacia arriba para presupuestar archivos pequeños. Se calcula con awk y no con $(( )): el
 # mksh de Android hace la aritmética en 32 bits con signo, y un archivo de más
 # de 2 GiB daba MB negativos (p. ej. -1581 para uno de 2515 MB).
 file_mb() {
-    stat -c %s "$1" 2>/dev/null | awk '{printf "%d", $1 / 1048576}'
+    stat -c %s "$1" 2>/dev/null | awk '{printf "%.0f", int(($1 + 1048575) / 1048576)}'
 }
 
 # Escribe preload_status.json de forma atómica (tmp + mv) para que la app,
@@ -74,15 +67,22 @@ write_status() {
         > "$PRELOAD_STATUS.tmp" 2>/dev/null && mv "$PRELOAD_STATUS.tmp" "$PRELOAD_STATUS"
 }
 
-# Evita dos precargas a la vez (p. ej. dos montajes seguidos). mount.sh ya
-# limpia este candado antes de lanzar una nueva, así que uno viejo colgado
-# aquí es de un proceso que sigue vivo de verdad.
+# Evita dos precargas a la vez. Solo quien obtuvo el candado limpia los
+# temporales. Un candado obsoleto se recupera al reiniciar, nunca a ciegas.
 LOCK="$MODDIR/preload.lock"
 mkdir "$LOCK" 2>/dev/null || exit 0
+# Restos de una corrida anterior que no terminó bien (el móvil se reinició a
+# la mitad, por ejemplo). No son el candado: ese se trata aparte.
+rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
+      "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done 2>/dev/null
+
 trap '[ -n "$MONITOR_PID" ] && kill "$MONITOR_PID" 2>/dev/null
+      for pid in $WPIDS; do stop_children "$pid"; kill -TERM "$pid" 2>/dev/null; done
       rm -rf "$LOCK"
       rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
-            "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done' EXIT INT TERM HUP
+            "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 
 ACTIVE="$(sed -n 's/.*"remote":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
 T="$(sed -n 's/.*"target":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
@@ -124,6 +124,11 @@ BUDGET_MB=$(( ${CACHE_GB:-$DEFAULT_GB} * 1024 - 512 ))
 WORKERS="$(cat "$MODDIR/config/preload_workers" 2>/dev/null)"
 case "$WORKERS" in ''|*[!0-9]*|0) WORKERS=4 ;; esac
 [ "$WORKERS" -gt 8 ] && WORKERS=8
+MEM_KB=$(awk '/MemAvailable/{print $2}' /proc/meminfo)
+case "$MEM_KB" in ''|*[!0-9]*) MEM_KB=0 ;; esac
+[ "$MEM_KB" -ge 1048576 ] || WORKERS=1
+[ "$MEM_KB" -ge 2097152 ] || { [ "$WORKERS" -le 2 ] || WORKERS=2; }
+command -v renice >/dev/null 2>&1 && renice 10 -p "$$" >/dev/null 2>&1
 
 # Tope de tiempo por archivo: 300 s como mínimo, y 4 s por MB para los
 # grandes (equivale a aguantar hasta ~0,25 MB/s). Un tope fijo cortaba a
@@ -135,21 +140,10 @@ case "$WORKERS" in ''|*[!0-9]*|0) WORKERS=4 ;; esac
 # para pgrep ese proceso sigue "vivo" aunque no avance nada). TERM primero;
 # si a los 2s sigue ahí (bloqueado en E/S, donde TERM no siempre alcanza),
 # remata con KILL.
-run_with_timeout() {
-    tl="$1"; shift
-    "$@" &
-    cpid=$!
-    ( sleep "$tl"; kill -TERM "$cpid" 2>/dev/null; sleep 2; kill -KILL "$cpid" 2>/dev/null ) &
-    wpid=$!
-    wait "$cpid" 2>/dev/null
-    rc=$?
-    kill "$wpid" 2>/dev/null
-    wait "$wpid" 2>/dev/null
-    return "$rc"
-}
+run_with_timeout() { run_timeout "$@"; }
 
 FILELIST="$MODDIR/.preload_list"
-find "$T" -type f -not -path '*/.rclone-bind-test/*' 2>/dev/null | sort > "$FILELIST"
+find "$T" -type f -not -path '*/.rclone-bind-test*/*' 2>/dev/null | sort > "$FILELIST"
 TOTAL="$(wc -l < "$FILELIST" 2>/dev/null | tr -d ' ')"
 [ -z "$TOTAL" ] && TOTAL=0
 
@@ -164,29 +158,9 @@ FP_NOW="$TOTAL $(du -sk "$T" 2>/dev/null | awk '{print $1}')"
 # (--vfs-cache-max-age) o por espacio, y sin esta comprobación se diría "ya
 # estaba precargado" con la caché vacía.
 CACHE_VFS="$MODDIR/cache/vfs"
+# Count + size cannot prove identical content or cache coverage. Always
+# traverse selected files; valid VFS cache serves these without re-download.
 MARKER_OK=0
-if [ "$FORCE" != "force" ] && [ "$CACHE_IS_RAM" = 0 ] && [ -f "$MARKER" ]; then
-    set -- $(cat "$MARKER" 2>/dev/null)
-    if [ "$1 $2" = "$FP_NOW" ]; then
-        case "$3" in
-            ''|*[!0-9]*) ;;
-            *)
-                CUR_KB="$(du -sk "$CACHE_VFS" 2>/dev/null | awk '{print $1}')"
-                case "$CUR_KB" in ''|*[!0-9]*) CUR_KB=0 ;; esac
-                [ "$3" -gt 0 ] && [ "$CUR_KB" -ge $(( $3 * 9 / 10 )) ] && MARKER_OK=1
-                ;;
-        esac
-    fi
-fi
-
-if [ "$MARKER_OK" = 1 ]; then
-    echo "$(date): Precarga: '$ACTIVE' ya estaba precargado por completo (sin cambios), se omite" >> "$LOG_FILE"
-    N_SELECTED="$TOTAL"
-    DONE_MB="$(( $(printf '%s' "$FP_NOW" | awk '{print $2}') / 1024 ))"
-    write_status false "$TOTAL" "$DONE_MB"
-    exit 0
-fi
-
 # Tope de archivos por corrida (config/preload_max_files; por defecto 20000,
 # antes fijo en 2000). Un mod grande de GTA o un juego Unity/Unreal con
 # miles de texturas y audios sueltos supera 2000 archivos sin acercarse al
@@ -312,6 +286,5 @@ echo "$(date): Precarga terminada: ${FINAL_MB} de ${DONE_MB} MB, $PN de $N_SELEC
 # cambió, no vuelve a bajar lo que ya está en disco.
 if [ "$CACHE_IS_RAM" = 0 ] && [ "$PN" = "$TOTAL" ] && [ "$TOTAL" -gt 0 ]; then
     mkdir -p "$MODDIR/config" 2>/dev/null
-    sync
     echo "$FP_NOW $(du -sk "$CACHE_VFS" 2>/dev/null | awk '{print $1+0}')" > "$MARKER"
 fi

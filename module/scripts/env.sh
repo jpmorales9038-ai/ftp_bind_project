@@ -24,18 +24,14 @@ done
 [ -n "$CERT_DIRS" ] && export SSL_CERT_DIR="$CERT_DIRS"
 unset CERT_DIRS
 
-# Fallback DNS: rclone (Go estático) lee /etc/resolv.conf, que Android no trae
-# (-> "lookup ... on [::1]:53: connection refused"). Si no hay nameservers,
-# se superpone uno propio sobre /system/etc con overlayfs. No depende del
-# overlay de módulos de KernelSU (que exige metamódulo en versiones recientes).
-# Idempotente: tras montarse, el grep encuentra los nameservers y no repite.
-if ! grep -qs '^nameserver' /system/etc/resolv.conf 2>/dev/null; then
-    _E="$MODDIR/etc_overlay"
-    mkdir -p "$_E/upper" "$_E/work"
-    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$_E/upper/resolv.conf"
-    chmod 644 "$_E/upper/resolv.conf"
-    mount -t overlay overlay \
-        -o "lowerdir=/system/etc,upperdir=$_E/upper,workdir=$_E/work" \
-        /system/etc 2>/dev/null
-    unset _E
+# Never overlay all of /system/etc. Only bind the resolver file when an
+# existing mount target is available. If missing, the module's system file
+# requires working systemless mounting (KernelSU metamodule where applicable).
+if ! grep -qs '^nameserver' /system/etc/resolv.conf; then
+    if [ -f /system/etc/resolv.conf ] && [ -f "$MODDIR/system/etc/resolv.conf" ]; then
+        mount --bind "$MODDIR/system/etc/resolv.conf" /system/etc/resolv.conf 2>/dev/null || :
+    fi
+    if ! grep -qs '^nameserver' /system/etc/resolv.conf; then
+        echo "AVISO: resolv.conf ausente; revisa el montaje systemless/DNS" >&2
+    fi
 fi

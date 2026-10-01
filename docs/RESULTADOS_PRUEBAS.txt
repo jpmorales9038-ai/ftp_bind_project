@@ -1,0 +1,20 @@
+test_all_shell_syntax (__main__.ReviewTests.test_all_shell_syntax) ... ok
+test_app_boundary_guards (__main__.ReviewTests.test_app_boundary_guards) ... ok
+test_benchmark_uses_unique_directory (__main__.ReviewTests.test_benchmark_uses_unique_directory) ... ok
+test_clear_cache_refuses_recovery_metadata (__main__.ReviewTests.test_clear_cache_refuses_recovery_metadata) ... ok
+test_lock_cleanup (__main__.ReviewTests.test_lock_cleanup) ... ok
+test_no_force_or_broad_system_overlay (__main__.ReviewTests.test_no_force_or_broad_system_overlay) ... ok
+test_operation_lock_exclusion (__main__.ReviewTests.test_operation_lock_exclusion) ... ok
+test_performance_matrix_with_fake_rclone (__main__.ReviewTests.test_performance_matrix_with_fake_rclone) ... ok
+test_preload_second_instance_preserves_temporaries (__main__.ReviewTests.test_preload_second_instance_preserves_temporaries) ... ok
+test_rc_secret_permissions_and_reuse (__main__.ReviewTests.test_rc_secret_permissions_and_reuse) ... ok
+test_remote_key_and_numeric_ranges (__main__.ReviewTests.test_remote_key_and_numeric_ranges) ... ok
+test_signature_conflict_never_uninstalls (__main__.ReviewTests.test_signature_conflict_never_uninstalls) ... ok
+test_target_validation (__main__.ReviewTests.test_target_validation) ... ok
+test_timeout_and_success (__main__.ReviewTests.test_timeout_and_success) ... ok
+test_unmount_pending_and_empty_queue (__main__.ReviewTests.test_unmount_pending_and_empty_queue) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 1.501s
+
+OK

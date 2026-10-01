@@ -1,55 +1,56 @@
 #!/system/bin/sh
 SELF="$(readlink -f "$0")"
 MODDIR=$(dirname "$(dirname "$SELF")")
-
-# Mismo motivo que en mount.sh: forzar el namespace global de PID 1 para
-# que el umount le pegue al mount real, no a una vista privada del proceso.
-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
-fi
-
+. "$MODDIR/scripts/common.sh"
+enter_global_namespace "$@"
+acquire_operation_lock
+. "$MODDIR/scripts/env.sh"
 LOG_FILE="$MODDIR/mount.log"
 STATUS_FILE="$MODDIR/status.json"
-
 RCLONE_MOUNTPOINT="/data/local/tmp/rclone_ftp"
-
-# Prioridad: la ruta que quedó realmente montada (guardada en status.json al
-# montar) por si config/target_path cambió después sin volver a montar;
-# si no hay status, se usa la de config, y si tampoco, la de siempre.
 TARGET_PATH="$(sed -n 's/.*"target":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
-if [ -z "$TARGET_PATH" ]; then
-    TARGET_PATH="$(cat "$MODDIR/config/target_path" 2>/dev/null)"
+if is_mount_at "$RCLONE_MOUNTPOINT"; then
+    valid_target "$TARGET_PATH" || { echo "ERROR: destino desconocido; no se desmonta a ciegas"; exit 1; }
+    setup_rc || exit 1
+    # No force mode: open writers or failed uploads leave the mount intact.
+    n=0
+    while :; do
+        stats=$(rc_call vfs/stats 2>>"$LOG_FILE") || { echo "ERROR: no se puede comprobar la cola VFS; montaje conservado"; exit 1; }
+        pending=$(printf '%s\n' "$stats" | awk '
+            /"(uploadsQueued|uploadsInProgress|erroredFiles|inUse)"[ \t]*:/ {
+                v=$0; sub(/.*:[ \t]*/,"",v); sub(/,.*/,"",v)
+                if (v !~ /^[0-9]+[ \t]*$/) bad=1
+                sum+=v; count++
+            }
+            END {if (bad || count!=4) print "unknown"; else print sum+0}')
+        [ "$pending" = 0 ] && break
+        [ "$pending" = unknown ] && { echo "ERROR: respuesta VFS incompatible; montaje conservado"; exit 1; }
+        [ "$n" -ge 30 ] && { echo "ERROR: quedan archivos abiertos/subidas pendientes; cierra las apps y reintenta"; exit 1; }
+        sleep 2; n=$((n + 1))
+    done
+    # Stop only this module's helpers, and their children.
+    for helper in watch.sh preload.sh perf_test.sh; do
+        for pid in $(pgrep -f "$MODDIR/scripts/$helper" 2>/dev/null); do
+            stop_children "$pid"; kill -TERM "$pid" 2>/dev/null
+        done
+    done
+    a=$(stat -c %d "$TARGET_PATH" 2>/dev/null)
+    b=$(stat -c %d "$RCLONE_MOUNTPOINT" 2>/dev/null)
+    if [ -n "$a" ] && [ "$a" = "$b" ]; then
+        umount "$TARGET_PATH" 2>>"$LOG_FILE" || { sh "$MODDIR/scripts/watch.sh" </dev/null >/dev/null 2>&1 &
+            echo "ERROR: bind ocupado; montaje conservado"; exit 1; }
+    fi
+    umount "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || {
+        mount --bind "$RCLONE_MOUNTPOINT" "$TARGET_PATH" 2>>"$LOG_FILE"
+        sh "$MODDIR/scripts/watch.sh" </dev/null >/dev/null 2>&1 &
+        echo "ERROR: FUSE ocupado; desmontaje rechazado"; exit 1;
+    }
 fi
-[ -z "$TARGET_PATH" ] && TARGET_PATH="/sdcard/FTP"
-
-# Primero se marca como desmontado y se detiene el watcher; si no, volvería
-# a crear el bind apenas se quite.
-echo '{"mounted":false}' > "$STATUS_FILE"
-[ -f "$MODDIR/watch.pid" ] && kill "$(cat "$MODDIR/watch.pid")" 2>/dev/null
+is_mount_at "$RCLONE_MOUNTPOINT" && { echo "ERROR: FUSE aun activo"; exit 1; }
+# Do not kill rclone by command pattern; a clean unmount ends its mount loop.
+if is_mount_at "$MODDIR/cache_ram"; then
+    umount "$MODDIR/cache_ram" 2>>"$LOG_FILE" || { echo "ERROR: tmpfs ocupado"; exit 1; }
+fi
+atomic_unmounted
 rm -f "$MODDIR/watch.pid"
-
-# Se desmonta en bucle: intentos anteriores pueden haber dejado varios binds
-# apilados en la misma carpeta.
-i=0
-while [ "$i" -lt 10 ] && umount -l "$TARGET_PATH" 2>/dev/null; do
-    i=$((i + 1))
-done
-umount -l "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || "$MODDIR/bin/fusermount3" -u "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE"
-
-# Por si el mount corre como proceso en background
-pkill -f "$MODDIR/bin/rclone mount" 2>/dev/null
-
-# Corta la precarga automática si seguía corriendo: el mount ya no existe,
-# seguir leyendo archivos ahí solo daría errores.
-pkill -f "$MODDIR/scripts/preload.sh" 2>/dev/null
-rm -rf "$MODDIR/preload.lock" "$MODDIR/.preload_list"
-
-# Libera la RAM de la caché en RAM (si estaba activa): el tmpfs es
-# descartable, así que basta con desmontarlo.
-RAM_CACHE_DIR="$MODDIR/cache_ram"
-if grep -q " $RAM_CACHE_DIR tmpfs" /proc/mounts; then
-    umount -l "$RAM_CACHE_DIR" 2>>"$LOG_FILE"
-fi
-
-echo '{"mounted":false}' > "$STATUS_FILE"
-echo "$(date): Desmontado" >> "$LOG_FILE"
+echo "$(date): Desmontado sin forzar; cola VFS vacia" >> "$LOG_FILE"

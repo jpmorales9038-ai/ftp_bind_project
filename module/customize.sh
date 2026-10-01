@@ -1,4 +1,6 @@
 SKIPUNZIP=0
+[ -f "$MODPATH/bin/rclone" ] || abort "Falta bin/rclone: este ZIP no es un modulo compilado"
+[ -f "$MODPATH/bin/fusermount3" ] || abort "Falta bin/fusermount3"
 
 ui_print "- Instalando RClone FTP Bind"
 
@@ -18,6 +20,9 @@ if [ -d "$OLD_CONFIG" ]; then
     cp -a "$OLD_CONFIG/." "$MODPATH/config/"
     ui_print "- Configuración anterior conservada"
 fi
+
+chmod 700 "$MODPATH/config"
+chmod 600 "$MODPATH/config/"* 2>/dev/null
 
 # rclone (binario Go estático) resuelve DNS leyendo /etc/resolv.conf, que
 # Android no trae: sin él, Google Drive falla con "lookup ... on [::1]:53".

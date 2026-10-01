@@ -1,0 +1,1473 @@
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,9 @@
++> **Revisión 1.9.9-review1 — fuentes, NO ZIP instalable.** Lee `docs/AUDITORIA_ES.md` y
++> `docs/VALIDACION_ANDROID_ES.md` antes de compilar o flashear. Esta revisión cambia
++> el desmontaje a no forzado y la caché RAM a solo lectura. Las instrucciones y
++> afirmaciones históricas de rendimiento siguientes describen 1.9.8 y pueden no
++> aplicar; el informe de revisión tiene prioridad para esta entrega.
++
+ <p align="center">
+   <img src="docs/banner.svg" alt="RClone FTP Bind: FTP, Google Drive y S3 como carpetas en Android. Oracle Cloud, Amazon S3, Cloudflare R2 y compatibles. Requiere KernelSU." width="100%">
+ </p>
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -26,12 +26,23 @@
+         }
+     }
+ 
++    val releaseStore = System.getenv("RCB_KEYSTORE")
++    if (!releaseStore.isNullOrBlank()) {
++        signingConfigs.create("privateRelease") {
++            storeFile = file(releaseStore)
++            storePassword = System.getenv("RCB_STORE_PASSWORD") ?: error("Falta RCB_STORE_PASSWORD")
++            keyAlias = System.getenv("RCB_KEY_ALIAS") ?: error("Falta RCB_KEY_ALIAS")
++            keyPassword = System.getenv("RCB_KEY_PASSWORD") ?: error("Falta RCB_KEY_PASSWORD")
++        }
++        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("privateRelease")
++    }
++
+     defaultConfig {
+         applicationId = "com.rclonebind.app"
+         minSdk = 26
+         targetSdk = 34
+-        versionCode = 46
+-        versionName = "1.9.8"
++        versionCode = 47
++        versionName = "1.9.9-review1"
+ 
+         // Cliente OAuth de Google Drive que trae la app: el usuario solo da su
+         // consentimiento, sin pegar credenciales. Se inyecta en el build desde
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -7,7 +7,7 @@
+ 
+     <application
+         android:name=".RCloneApp"
+-        android:allowBackup="true"
++        android:allowBackup="false"
+         android:icon="@mipmap/ic_launcher"
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:label="RClone FTP Bind"
+--- a/app/src/main/java/com/rclonebind/app/BindViewModel.kt
++++ b/app/src/main/java/com/rclonebind/app/BindViewModel.kt
+@@ -492,20 +492,23 @@
+         val current = mountedRemote
+         val onlyUnmounting = mounted && (current == null || current == target)
+         busy = true
+-        val result = withContext(Dispatchers.IO) {
+-            when {
+-                onlyUnmounting -> RootShell.unmount()
+-                mounted -> {
+-                    // Hay otro servidor montado: se desmonta y se monta el seleccionado.
+-                    RootShell.unmount()
+-                    RootShell.mount()
++        val result = try {
++            withContext(Dispatchers.IO) {
++                when {
++                    onlyUnmounting -> RootShell.unmount()
++                    mounted -> {
++                        val stopped = RootShell.unmount()
++                        if (stopped.success) RootShell.mount() else stopped
++                    }
++                    else -> RootShell.mount()
+                 }
+-                else -> RootShell.mount()
++            }.also {
++                message = if (it.success) null else "Error: ${it.output.takeLast(300)}"
++                reload()
+             }
+-        }
+-        message = if (result.success) null else "Error: ${result.output.takeLast(200)}"
+-        reload()
+-        busy = false
++        } finally {
++            busy = false
++        }
+ 
+         // mount.sh ya lanzó la precarga sola en segundo plano (ver
+         // preload.sh). Se la sigue desde ya en vez de esperar a que algo
+@@ -579,8 +582,9 @@
+     }
+ 
+     fun setAutostart(enabled: Boolean) = viewModelScope.launch {
+-        autostart = enabled
+-        withContext(Dispatchers.IO) { RootShell.setAutostart(enabled) }
++        val result = withContext(Dispatchers.IO) { RootShell.setAutostart(enabled) }
++        if (result.success) autostart = enabled
++        else message = "No se pudo guardar el inicio automático: ${result.output.take(200)}"
+     }
+ 
+     fun refreshLogs() = viewModelScope.launch {
+@@ -602,8 +606,11 @@
+         }
+         if (busy) return@launch
+         busy = true
+-        val result = withContext(Dispatchers.IO) { RootShell.clearCache() }
+-        busy = false
++        val result = try {
++            withContext(Dispatchers.IO) { RootShell.clearCache() }
++        } finally {
++            busy = false
++        }
+         message = if (result.success) {
+             val kb = result.output.trim().removePrefix("OK").trim().toLongOrNull() ?: 0L
+             cacheKb = 0L
+--- a/app/src/main/java/com/rclonebind/app/net/FtpScanner.kt
++++ b/app/src/main/java/com/rclonebind/app/net/FtpScanner.kt
+@@ -24,7 +24,7 @@
+ 
+ private const val CONNECT_TIMEOUT_MS = 900
+ private const val BANNER_TIMEOUT_MS = 1500
+-private const val MAX_CONCURRENCY = 96
++private const val MAX_CONCURRENCY = 32
+ 
+ /** Máximo de hosts a recorrer (una /22); redes más grandes se acotan alrededor de la IP local. */
+ private const val MAX_HOSTS = 1022
+@@ -69,7 +69,9 @@
+  */
+ private fun localNetFromInterfaces(): LocalNet? = try {
+     NetworkInterface.getNetworkInterfaces()?.asSequence()
+-        ?.filter { it.isUp && !it.isLoopback }
++        ?.filter { it.isUp && !it.isLoopback &&
++            (it.name.startsWith("wlan") || it.name.startsWith("ap") ||
++                it.name.startsWith("swlan") || it.name.startsWith("eth")) }
+         ?.flatMap { ni ->
+             ni.interfaceAddresses.asSequence()
+                 .filter { it.address is Inet4Address && !it.address.isLoopbackAddress }
+@@ -100,7 +102,8 @@
+ private fun hostsOf(net: LocalNet): List<String> {
+     val self = ipToInt(net.address.address)
+     // Prefijo entre /22 y /30: nunca más de 1022 hosts, ni una subred absurda.
+-    val prefix = net.prefix.coerceIn(22, 30)
++    if (net.prefix !in 0..30) return emptyList()
++    val prefix = net.prefix.coerceAtLeast(22)
+     val mask = -1 shl (32 - prefix)
+     val network = self and mask
+     val broadcast = network or mask.inv()
+@@ -122,7 +125,18 @@
+         socket.connect(InetSocketAddress(ip, port), CONNECT_TIMEOUT_MS)
+         val banner = try {
+             socket.soTimeout = BANNER_TIMEOUT_MS
+-            socket.getInputStream().bufferedReader().readLine()?.trim()
++            // A hostile/broken banner must not allocate an unbounded line.
++            val input = socket.getInputStream()
++            val bytes = java.io.ByteArrayOutputStream(256)
++            val deadline = System.nanoTime() + BANNER_TIMEOUT_MS * 1_000_000L
++            while (bytes.size() < 1024 && System.nanoTime() < deadline) {
++                val remainingMs = ((deadline - System.nanoTime()) / 1_000_000L).coerceAtLeast(1)
++                socket.soTimeout = remainingMs.toInt()
++                val c = input.read()
++                if (c < 0 || c == 10) break
++                bytes.write(c)
++            }
++            bytes.toString("UTF-8").trim().ifEmpty { null }
+         } catch (e: Exception) {
+             null
+         }
+@@ -159,7 +173,11 @@
+                     FTP_PORTS.map { port ->
+                         async {
+                             val found = probeFtp(ip, port, net.network)
+-                            onProgress(checked.incrementAndGet(), total)
++                            val done = checked.incrementAndGet()
++                            // Rate-limit Compose state updates on large subnets.
++                            synchronized(checked) {
++                                if (done % 16 == 0 || done == total) onProgress(checked.get(), total)
++                            }
+                             found
+                         }
+                     }
+--- a/app/src/main/java/com/rclonebind/app/root/Conf.kt
++++ b/app/src/main/java/com/rclonebind/app/root/Conf.kt
+@@ -462,6 +462,10 @@
+     path.isEmpty() -> "Escribe una ruta"
+     !path.startsWith("/") -> "Debe ser una ruta absoluta (empieza con /)"
+     path == "/" -> "No uses la raíz del sistema"
+-    path.contains("..") -> "La ruta no puede contener \"..\""
+-    else -> null
+-}
++    path.any { it.isISOControl() || it == '"' || it == '\\' } -> "La ruta contiene caracteres no admitidos"
++    path.contains("//") -> "La ruta no puede contener barras duplicadas"
++    listOf("/sdcard/", "/storage/emulated/0/", "/storage/self/primary/", "/data/media/0/")
++        .none { path.startsWith(it) && path.length > it.length } -> "Elige una subcarpeta del almacenamiento interno"
++    path.split('/').any { it == ".." || it == "." } -> "La ruta no puede contener segmentos . o .."
++    else -> null
++}
+--- a/app/src/main/java/com/rclonebind/app/root/RootShell.kt
++++ b/app/src/main/java/com/rclonebind/app/root/RootShell.kt
+@@ -58,7 +58,7 @@
+ 
+     fun unmount(): Result = run("sh ${ModulePaths.SCRIPTS}/unmount.sh")
+ 
+-    fun status(): Result = run("cat ${ModulePaths.STATUS_FILE} 2>/dev/null || echo '{\"mounted\":false}'")
++    fun status(): Result = run("sh ${ModulePaths.SCRIPTS}/status.sh")
+ 
+     // ---- Precarga de assets (perfil Máximo / Drive): ver scripts/preload.sh ----
+ 
+@@ -69,7 +69,7 @@
+      * comprobar el remoto tras agregar archivos nuevos.
+      *
+      * Espera hasta 5s (en segundo plano, sin bloquear esta llamada) a que
+-     * esa corrida anterior suelte su candado de verdad antes de borrarlo y
++     * esa corrida anterior suelte su candado de verdad antes de
+      * lanzar la nueva: borrarlo sin esperar podía dejar la precarga nueva
+      * pisando archivos temporales a medio limpiar de la vieja y terminando
+      * con 0 archivos seleccionados (ver el mismo ajuste en mount.sh).
+@@ -83,14 +83,14 @@
+     fun preloadStart(): Result = run(
+         "pkill -f ${ModulePaths.SCRIPTS}/preload.sh 2>/dev/null; " +
+             "( i=0; while [ -d ${ModulePaths.BASE}/preload.lock ] && [ \"\$i\" -lt 5 ]; do sleep 1; i=\$((i + 1)); done; " +
+-            "rm -rf ${ModulePaths.BASE}/preload.lock; " +
+-            "nohup sh ${ModulePaths.SCRIPTS}/preload.sh force >/dev/null 2>&1 ) &"
++            "[ -d ${ModulePaths.BASE}/preload.lock ] && exit 1; " +
++            "nohup sh ${ModulePaths.SCRIPTS}/preload.sh force </dev/null >/dev/null 2>&1 ) </dev/null >/dev/null 2>&1 &"
+     )
+ 
+     fun preloadStatus(): String =
+         Shell.cmd("cat ${ModulePaths.PRELOAD_STATUS_FILE} 2>/dev/null").exec().out.joinToString("\n")
+ 
+-    fun tailLog(lines: Int = 200): Result = run("tail -n $lines ${ModulePaths.LOG_FILE} 2>/dev/null")
++    fun tailLog(lines: Int = 200): Result = run("tail -n ${lines.coerceIn(1, 2000)} ${ModulePaths.LOG_FILE} 2>/dev/null")
+ 
+     /**
+      * Vacía el log sin borrar el archivo: rclone lo mantiene abierto en modo
+@@ -102,17 +102,26 @@
+     // ---- Servidores (una sección [nombre] por servidor en rclone.conf) ----
+ 
+     private fun readConf(): Conf {
+-        val out = Shell.cmd("cat ${ModulePaths.RCLONE_CONF} 2>/dev/null").exec().out
+-        return parseConf(out.joinToString("\n"))
+-    }
+-
+-    private fun writeConf(conf: Conf): Result =
+-        run(
+-            "mkdir -p ${ModulePaths.CONFIG_DIR} && " +
++        val result = Shell.cmd("if [ -e ${ModulePaths.RCLONE_CONF} ]; then cat ${ModulePaths.RCLONE_CONF}; fi").exec()
++        check(result.isSuccess) { "No se pudo leer la configuración; no se sobrescribe" }
++        return parseConf(result.out.joinToString("\n"))
++    }
++
++    private fun writeConf(conf: Conf): Result {
++        for ((name, values) in conf) {
++            validateProfileName(name, name, emptyList())?.let { return Result(false, it) }
++            if (values.any { (k, v) ->
++                    k.isBlank() || k.any { it == '=' || it == '[' || it == ']' || it.isISOControl() } ||
++                        v.any { it.isISOControl() }
++                }) return Result(false, "La configuración contiene caracteres de control no admitidos")
++        }
++        return run(
++            "umask 077; mkdir -p ${ModulePaths.CONFIG_DIR} && chmod 700 ${ModulePaths.CONFIG_DIR} && " +
+                 "printf '%s' ${sq(serializeConf(conf))} > ${ModulePaths.RCLONE_CONF}.tmp && " +
+                 "chmod 600 ${ModulePaths.RCLONE_CONF}.tmp && " +
+                 "mv ${ModulePaths.RCLONE_CONF}.tmp ${ModulePaths.RCLONE_CONF}"
+         )
++    }
+ 
+     fun loadProfiles(): List<RemoteProfile> = readConf().toProfiles()
+ 
+@@ -121,6 +130,7 @@
+      * distinto es un renombrado). Con [pass] vacío al editar se conserva la
+      * contraseña que ya estaba guardada.
+      */
++    @Synchronized
+     fun saveProfile(original: String?, name: String, host: String, port: String, user: String, pass: String): Result {
+         val conf = readConf()
+         if (name != original && conf.containsKey(name)) {
+@@ -138,7 +148,7 @@
+             // cifrado). stderr va a /dev/null porque la app mezcla stderr con
+             // stdout; se toma la última línea no vacía y se valida el formato
+             // (base64url de IV de 16 bytes + datos => mínimo 22 caracteres).
+-            val obscure = Shell.cmd("${ModulePaths.BIN} obscure ${sq(pass)} 2>/dev/null").exec()
++            val obscure = Shell.cmd("printf '%s' ${sq(pass)} | ${ModulePaths.BIN} obscure - 2>/dev/null").exec()
+             if (!obscure.isSuccess) {
+                 return Result(false, "No se pudo ofuscar la contraseña: " + obscure.out.joinToString("\n"))
+             }
+@@ -190,6 +200,7 @@
+      * Crea o edita un remoto Google Drive. Con [token] null al editar se
+      * conserva la sesión que ya estaba guardada.
+      */
++    @Synchronized
+     fun saveDriveProfile(original: String?, name: String, token: String?, options: DriveOptions): Result {
+         val conf = readConf()
+         if (name != original && conf.containsKey(name)) {
+@@ -232,6 +243,7 @@
+      * ya guardada. A diferencia de la contraseña FTP, rclone espera la clave
+      * secreta de S3 en claro (no ofuscada); el archivo queda con chmod 600.
+      */
++    @Synchronized
+     fun saveS3Profile(original: String?, name: String, options: S3Options, secret: String): Result {
+         val conf = readConf()
+         if (name != original && conf.containsKey(name)) {
+@@ -276,6 +288,7 @@
+         return writeConf(putSection(conf, original, name, section))
+     }
+ 
++    @Synchronized
+     fun deleteProfile(name: String): Result {
+         val conf = readConf()
+         conf.remove(name)
+@@ -310,14 +323,16 @@
+             .joinToString("").trim().ifEmpty { null }
+ 
+     fun setActive(name: String): Result =
+-        run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(name)} > ${ModulePaths.ACTIVE_FILE}")
++        writePerfValue(ModulePaths.ACTIVE_FILE, name)
+ 
+     fun readTargetPath(): String =
+         Shell.cmd("cat ${ModulePaths.TARGET_PATH_FILE} 2>/dev/null").exec().out
+             .joinToString("").trim().ifEmpty { DEFAULT_TARGET_PATH }
+ 
+-    fun setTargetPath(path: String): Result =
+-        run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(path)} > ${ModulePaths.TARGET_PATH_FILE}")
++    fun setTargetPath(path: String): Result {
++        validateTargetPath(path)?.let { return Result(false, it) }
++        return writePerfValue(ModulePaths.TARGET_PATH_FILE, path)
++    }
+ 
+     fun readPerfMode(): PerfMode {
+         val v = Shell.cmd("cat ${ModulePaths.PERF_FILE} 2>/dev/null").exec().out.joinToString("").trim()
+@@ -325,7 +340,7 @@
+     }
+ 
+     private fun writePerfValue(path: String, value: String): Result = run(
+-        "mkdir -p ${ModulePaths.CONFIG_DIR} && " +
++        "umask 077; mkdir -p ${ModulePaths.CONFIG_DIR} && chmod 700 ${ModulePaths.CONFIG_DIR} && " +
+             "printf '%s' ${sq(value)} > $path.tmp && mv -f $path.tmp $path"
+     )
+ 
+@@ -429,7 +444,7 @@
+             .joinToString("").trim() == "1"
+ 
+     fun setAutostart(enabled: Boolean): Result =
+-        run("mkdir -p ${ModulePaths.CONFIG_DIR} && echo '${if (enabled) "1" else "0"}' > ${ModulePaths.CONFIG_DIR}/autostart")
++        writePerfValue("${ModulePaths.CONFIG_DIR}/autostart", if (enabled) "1" else "0")
+ 
+     // ---- Caché en disco de rclone ----
+ 
+--- a/app/src/main/java/com/rclonebind/app/ui/screens/HomeScreen.kt
++++ b/app/src/main/java/com/rclonebind/app/ui/screens/HomeScreen.kt
+@@ -200,15 +200,15 @@
+     if (showRamCacheConfirm) {
+         AlertDialog(
+             onDismissRequest = { showRamCacheConfirm = false },
+-            title = { Text("¿Activar caché en RAM?") },
++            title = { Text("¿Activar caché en RAM de solo lectura?") },
+             text = {
+                 Text(
+                     "La caché del perfil Máximo se guardará en la memoria RAM del " +
+                         "teléfono en vez del almacenamiento interno: puede acelerar lecturas " +
+                         "ya cacheadas, pero no la red. Consume RAM según se llena durante el " +
+                         "tiempo que dure el montaje y su contenido se pierde al desmontar " +
+-                        "o reiniciar. IMPORTANTE: las escrituras pendientes de subir pueden " +
+-                        "perderse si se reinicia o se corta la alimentación. Si al " +
++                        "o reiniciar. Con RAM activa el montaje será de solo lectura para " +
++                        "no almacenar escrituras pendientes en memoria volátil. Si al " +
+                         "montar no hay memoria suficiente, se usa el almacenamiento interno " +
+                         "sin más aviso que una línea en Logs."
+                 )
+@@ -507,7 +507,7 @@
+                 Column(Modifier.weight(1f)) {
+                     Text("Caché en RAM", style = MaterialTheme.typography.titleMedium)
+                     Text(
+-                        "Lecturas y escrituras a velocidad de RAM. Se pierde al desmontar o reiniciar.",
++                        "Solo lectura para proteger tus datos. La caché se pierde al desmontar o reiniciar.",
+                         style = MaterialTheme.typography.bodySmall,
+                         color = scheme.onSurfaceVariant
+                     )
+--- /dev/null
++++ b/docs/AUDITORIA_ES.md
+@@ -0,0 +1,76 @@
++# Auditoría y revisión 1.9.9-review1
++
++## Resultado y alcance
++Se revisó el proyecto adjunto 1.9.8 con prioridad en la frontera root, FUSE/bind, datos pendientes, perfiles FTP/Drive/S3, precarga y pruebas de rendimiento. Se entrega una revisión de FUENTES, no una release ni un módulo listo para instalar. No se garantiza el mejor rendimiento posible: depende de dispositivo, kernel, backend, red y carga. No hay mediciones comparativas reales.
++
++El original no contiene APK, rclone, fusermount3, Gradle Wrapper ni un flujo CI dentro del ZIP. Este entorno tampoco tiene Java, Gradle, Kotlin, SDK Android o acceso a internet. No se compiló Kotlin/Compose, no se resolvieron dependencias, no se montó FUSE ni se probó KernelSU/SELinux. Sintaxis POSIX y simulaciones no sustituyen Android mksh/toybox. La revisión debe tratarse como candidata para integración, no como software validado de producción.
++
++## Hallazgos en el original y tratamiento
++Las ubicaciones siguientes se refieren a miembros del ZIP original `rclone-ftp-bind_1.9.8.zip`.
++
++| Prioridad | Ubicación original | Problema | Tratamiento |
++|---|---|---|---|
++| Crítica | module/scripts/unmount.sh:25–51 | Marca desmontado antes de terminar, usa umount -l, mata rclone y descarta tmpfs sin comprobar subidas | Desmontaje no forzado; consulta autenticada vfs/stats; conserva montaje si no puede demostrar cola vacía |
++| Crítica | module/scripts/clear_cache.sh:16–26 | mounted:false no demuestra que no haya FUSE/proceso ni escrituras recuperables | Candado común, comprobación de montaje/proceso, rechazo conservador si existen archivos vfsMeta |
++| Alta | module/scripts/install_app.sh:43–50 | Desinstala automáticamente con conflicto de firma, perdiendo datos | No desinstalar, no forzar downgrade; pedir resolución manual |
++| Alta | module/scripts/env.sh:34–47 | Superpone todo /system/etc para un único archivo DNS | Elimina overlay amplio; bind de resolv.conf solo sobre archivo existente; advierte si sigue ausente |
++| Alta | module/scripts/preload.sh:56–85 | Borra temporales antes de adquirir el candado | Adquirir candado antes de borrar, señales terminan y limpieza de hijos |
++| Alta | module/scripts/perf_test.sh, sección write | Carpeta fija .rclone-bind-test con limpieza recursiva | Carpeta exclusiva por PID, mkdir sin -p, no borrar una carpeta preexistente, plazos en dd |
++| Alta | app/.../root/Conf.kt, validateTargetPath | Permite destinos fuera del almacenamiento, controles/comillas incompatibles con JSON | Validación en UI, persistencia y scripts; verificación de ruta resuelta antes del bind |
++| Alta | app/.../BindViewModel.kt, toggleMount | Ignora el resultado de unmount antes de montar otro remoto | Solo montar tras desmontaje exitoso; busy se libera en finally |
++| Media | module/scripts/mount.sh:177–179 | Reutiliza FUSE previo aunque remoto/opciones hayan cambiado | Rechaza reutilización; exige desmontar primero |
++| Media | module/scripts/preload.sh:66–67 y 156–187 | Redondea MB hacia abajo; conteo+tamaño no prueban identidad/cobertura | Redondeo hacia arriba; no omitir recorridos basándose en huella débil |
++| Media | module/scripts/watch.sh:50 | Sondeo cada segundo con dos stat | Intervalo de 5 s, timeout en stat, rebind serializado |
++| Media | app/.../net/FtpScanner.kt | 96 hilos, readLine sin tope y actualización por cada puerto; fallback podía elegir móvil/VPN; /31 expandida artificialmente | 32 hilos, banner 1 KiB y deadline, progreso agrupado, fallback LAN, sin expandir /31–/32 |
++| Media | app/.../root/RootShell.kt | Valor de contraseña como argumento de obscure, readConf sin comprobar fallo y escritura INI sin control de saltos | obscure por stdin, error de lectura no sobreescribe, validación INI, guardado de perfiles sincronizado |
++| Media | app/src/main/AndroidManifest.xml | allowBackup=true innecesario para una app con funciones privilegiadas | Backup deshabilitado |
++| Media | app/build.gradle.kts | Clave debug pública compartida usada para actualizaciones | Se conserva para compatibilidad debug; añade firma release privada opcional por entorno. Cambiar firma exige migración manual |
++
++## Arquitectura de la revisión
++- `common.sh`: permisos privados, validación, namespace con guardia contra reentrada, candado de operaciones, timeout independiente del comando Android timeout, RC autenticado.
++- `status.sh`: verifica FUSE antes de devolver un estado montado; no considera status.json prueba suficiente de existencia.
++- RC escucha exclusivamente en 127.0.0.1:55783, usuario rclonebind y secreto aleatorio de 32 bytes guardado con 0600. No se usa rc-no-auth. Si el puerto está ocupado, el montaje debe fallar, no conectarse silenciosamente a otro servidor.
++- El desmontaje espera hasta aproximadamente 60 s por cola/archivos abiertos, aparte de timeouts de las consultas. Inspecciona uploadsQueued, uploadsInProgress, erroredFiles e inUse. Respuesta incompleta o incompatible = rechazo. La estructura real de vfs/stats y cierre de rclone deben comprobarse con el binario elegido.
++- No hay umount lazy, force ni kill global de rclone. Esto puede impedir desmontar cuando haya apps usando archivos: cerrar esas apps y reintentar es deliberadamente preferible a perder datos.
++- La caché RAM activa impone `--read-only`. Si hay metadatos VFS en disco, se rechaza la activación de RAM de manera conservadora. Esta protección puede rechazar también cachés limpias: no se interpreta el esquema de vfsMeta para evitar falsos negativos peligrosos.
++- La limpieza de caché también es conservadora: puede negarse después de un desmontaje limpio si rclone conserva metadatos. No se añadió un borrado forzado. La recuperación/limpieza selectiva de entradas limpias queda pendiente de implementar contra una versión fijada de rclone.
++- Candados obsoletos fallan de forma segura y se limpian al inicio del servicio tras un reboot. No se asume que kill -0/PID basta para recuperar un candado en presencia de reutilización de PID.
++- Rotación limitada del log al próximo montaje si supera 4 MiB, reteniendo 2000 líneas. No limita crecimiento durante un montaje muy largo.
++- Se retiran updateJson de esta revisión para que una actualización del proyecto original no sobrescriba silenciosamente los cambios. App y módulo pasan a versionCode 47 / 1.9.9-review1.
++
++## Rendimiento: decisiones y límites
++Se mantienen buffers moderados, transfers/checkers y perfiles existentes. No se aumenta indiscriminadamente la concurrencia ni se modifican parámetros globales del kernel, scheduler, SELinux, CPU, TCP o drop_caches.
++
++Las mejoras buscan reducir trabajo y contención, no demostrar más MB/s: watcher menos frecuente (reacción más lenta), menos hilos de escaneo (puede tardar más), progreso menos ruidoso y precarga de prioridad baja con 1–2 workers bajo presión de memoria. Contabilizar por MB redondeados puede infraprecargar colecciones de miles de archivos pequeños, pero evita superar el presupuesto por tratarlos como cero.
++
++La caché completa mejora relecturas; no acelera una primera descarga limitada por el enlace. El límite VFS de espacio es blando: archivos abiertos y subidas pendientes pueden superarlo. RAM limitada por tmpfs no constituye reserva garantizada contra OOM. Para contenido escribible, usar caché persistente en disco, no RAM.
++
++La prueba incorporada mide principalmente filesystem/VFS; escribir/releer rápidamente no certifica subida remota ni integridad después de reboot. Las lecturas supuestamente frías pueden ya estar cacheadas. No debe presentarse su resultado como benchmark fiable de internet o del proveedor.
++
++## Pruebas ejecutadas
++`python3 tests/test_review.py`: 15 métodos de prueba, resultado OK. Incluyen subcasos de rutas y matriz de 6 perfiles. `dash -n`: 16 scripts sin errores de sintaxis. Pruebas de namespace real, mount, binarios, compilación, firma, Google OAuth y SELinux: NO ejecutadas.
++
++Se comprobaron validación de rutas (incluidos saltos de línea), timeout y códigos, exclusión/limpieza de candados, secreto RC y permisos, parseo literal de remotos/CRLF/rangos, perfiles con rclone simulado, conflicto de firma, temporales de precarga bajo concurrencia, rechazo de borrado con metadatos y desmontaje simulado con cola vacía/pendiente. Las aserciones de Kotlin son textuales, no compilación ni pruebas de comportamiento Android.
++
++## Pendientes y riesgos que NO se deben ocultar
++1. **Build y dependencias**: verificar disponibilidad y compatibilidad de AGP 8.13.0, Kotlin 2.2.21, Compose BOM 2026.04.01, Material3 1.5.0-alpha18 y haze 1.6.10. No se han reemplazado a ciegas ni se ha confirmado su publicación.
++2. **DNS**: la resolución Go sigue dependiendo de resolv.conf. Si no existe, puede requerir montaje systemless/metamódulo. Los DNS públicos originales no respetan necesariamente Private DNS, VPN o split DNS. Configurar según la red antes de usarlo; no hay integración netd implementada.
++3. **Namespaces y almacenamiento**: entrar en PID 1 no garantiza visibilidad en apps con namespaces propios/scoped storage. Fallback /data/media/0 no prueba visibilidad en todos los exploradores ni juegos. Probar con las apps objetivo, no únicamente adb root.
++4. **Estado**: status.sh valida FUSE, pero no certifica la accesibilidad del remoto, bind visible en otra app ni opciones aplicadas. Si el bind falla después de crear FUSE puede quedar FUSE huérfano y requerir intervención controlada.
++5. **Concurrencia**: candado serializa mount/unmount/clear y rebind. No es una base transaccional compartida por OAuth y cambios externos de rclone.conf. La sincronización JVM tampoco impide escritura externa/refresh de token concurrente.
++6. **Precarga**: listas basadas en líneas no soportan nombres de archivo con newline; enumeración de find todavía puede ser costosa; recorrer para validar no detecta de inmediato cambios mientras dir-cache-time siga vigente. No se afirma cobertura absoluta de la caché.
++7. **Timeouts**: TERM no termina procesos bloqueados en E/S ininterrumpible; no se fuerza KILL por seguridad. Se siguen usando pgrep/pkill de patrones específicos en algunos controles de auxiliares y se deben validar en toybox.
++8. **Memoria y batería**: coste por archivo abierto, concurrencia real y presión de RAM no están medidos. Control adaptativo de foreground/metered network no implementado; la precarga puede competir con un juego o consumir datos móviles.
++9. **RC y datos**: comprobar campos exactos contra la versión real, puerto, permisos y proceso daemon. Las credenciales se protegen frente a usuarios no root, no frente a root. No hay defensa contra escritura nueva concurrente entre la consulta final y el desmontaje; umount no forzado ayuda, pero no reemplaza cerrar clientes escritores.
++10. **Seguridad de transporte**: FTP sin TLS envía credenciales/contenido en claro. El backend puede conservar ajustes tls manuales, pero no se agregó un flujo FTPS/SFTP completo. Evaluar antes de usar fuera de una LAN confiable.
++11. **Firma**: el debug.keystore original se conserva para no romper updates debug y NO es una identidad segura de producción. No se cambió applicationId, por lo que una firma release distinta entrará en conflicto; respaldar y migrar conscientemente.
++12. **UI/lifecycle**: no hay prueba instrumentada de cancelación OAuth, recreación, procesos muertos o versiones Android recientes. No se eliminaron alfa/blur sin comprobar el diseño.
++
++## Compilación y empaquetado
++1. Lee `VALIDACION_ANDROID_ES.md` y respalda configuración/caché persistente con escrituras pendientes.
++2. Instala un entorno Android de desarrollo JDK 17, SDK 36 y Gradle compatible con AGP. El ZIP no trae Wrapper: generarlo y versionarlo con checksum de la distribución aprobada.
++3. Resuelve dependencias y ejecuta `gradle :app:assembleDebug` o release tras integrar Wrapper. No se ha ejecutado aquí.
++4. Release opcional: variables RCB_KEYSTORE, RCB_STORE_PASSWORD, RCB_KEY_ALIAS, RCB_KEY_PASSWORD. Nunca incluir esa clave privada en el repo/ZIP. No se añadió shrink/minify sin validarlo.
++5. Obtén rclone y fusermount3 verificados para la arquitectura del dispositivo y conserva versión/checksum/origen. No se ha descargado ninguno. Coloca los binarios en module/bin y APK en module/app.apk.
++6. Empaqueta el contenido de module como raíz del ZIP instalable; el ZIP de fuentes entregado NO tiene esa estructura ni binarios. customize.sh abortará un módulo incompleto.
++7. Usa una instalación de prueba y valida todo el plan antes de considerarlo estable. La revisión no publica releases en el repositorio original.
+--- /dev/null
++++ b/docs/RESULTADOS_PRUEBAS.txt
+@@ -0,0 +1,20 @@
++test_all_shell_syntax (__main__.ReviewTests.test_all_shell_syntax) ... ok
++test_app_boundary_guards (__main__.ReviewTests.test_app_boundary_guards) ... ok
++test_benchmark_uses_unique_directory (__main__.ReviewTests.test_benchmark_uses_unique_directory) ... ok
++test_clear_cache_refuses_recovery_metadata (__main__.ReviewTests.test_clear_cache_refuses_recovery_metadata) ... ok
++test_lock_cleanup (__main__.ReviewTests.test_lock_cleanup) ... ok
++test_no_force_or_broad_system_overlay (__main__.ReviewTests.test_no_force_or_broad_system_overlay) ... ok
++test_operation_lock_exclusion (__main__.ReviewTests.test_operation_lock_exclusion) ... ok
++test_performance_matrix_with_fake_rclone (__main__.ReviewTests.test_performance_matrix_with_fake_rclone) ... ok
++test_preload_second_instance_preserves_temporaries (__main__.ReviewTests.test_preload_second_instance_preserves_temporaries) ... ok
++test_rc_secret_permissions_and_reuse (__main__.ReviewTests.test_rc_secret_permissions_and_reuse) ... ok
++test_remote_key_and_numeric_ranges (__main__.ReviewTests.test_remote_key_and_numeric_ranges) ... ok
++test_signature_conflict_never_uninstalls (__main__.ReviewTests.test_signature_conflict_never_uninstalls) ... ok
++test_target_validation (__main__.ReviewTests.test_target_validation) ... ok
++test_timeout_and_success (__main__.ReviewTests.test_timeout_and_success) ... ok
++test_unmount_pending_and_empty_queue (__main__.ReviewTests.test_unmount_pending_and_empty_queue) ... ok
++
++----------------------------------------------------------------------
++Ran 15 tests in 1.501s
++
++OK
+--- /dev/null
++++ b/docs/VALIDACION_ANDROID_ES.md
+@@ -0,0 +1,32 @@
++# Validación necesaria en Android / KernelSU
++
++## Datos de la plataforma
++Registrar modelo, RAM, ABI, Android/API, kernel, KernelSU/KernelSU Next, gestor, metamódulo si aplica, estado SELinux, versión/checksum rclone y fusermount3, backend/región y red. No cambiar SELinux a permisivo para esconder errores.
++
++## Antes de instalar
++- Respaldar rclone.conf, flags y caché persistente que tenga escrituras pendientes, sin publicar tokens/claves.
++- Comprobar firma APK frente a la instalada. Si cambia, no desinstalar hasta tener respaldo y decisión explícita.
++- Compilar debug/release, comprobar Manifest, permisos, API y dependencias. Añadir Gradle Wrapper reproducible.
++- Ejecutar pruebas locales incluidas; después compilación y pruebas instrumentadas. La batería Python NO valida Kotlin.
++
++## Funcional y datos
++1. Instalar/actualizar con misma firma y con firma incompatible: en esta última no debe desinstalar ni borrar datos.
++2. Montar FTP, Drive, AWS/Oracle/R2; verificar desde una app sin root. Comprobar namespace/target real, DNS/HTTPS y SELinux denials. Probar con y sin VPN/Private DNS.
++3. Probar destino con espacios, symlinks, rutas inválidas y segmentos . / ..; no permitir bind sobre /system, /data/adb ni raíces completas.
++4. Lanzar dos montajes, mount+unmount y clear+mount simultáneos: solo una operación debe entrar.
++5. Escribir un archivo grande de datos aleatorios. Desconectar la red y desmontar: con cola pendiente debe rechazarse sin borrar caché. Restaurar red, esperar y comparar SHA-256 directamente contra remoto (no solo VFS).
++6. Abrir un archivo en una app durante desmontaje: debe rechazar o cerrar limpiamente sin lazy/force. Cambiar servidor no debe continuar si unmount falla.
++7. Reiniciar con datos pendientes: recuperar en disco usando mismo remoto y caché antes de permitir limpieza. Simular kill inesperado solo en dispositivo de prueba.
++8. Activar RAM: si realmente se utiliza, verificar que crear/editar archivos falla como solo lectura. Si no hay RAM suficiente debe utilizar disco y registrarlo. Metadatos en disco deben bloquear cambio a RAM.
++9. Con metadatos VFS, clearCache debe rechazar conservadoramente, aunque estén limpios. No borrar vfsMeta para eludir esto sin verificar la recuperación.
++10. Cerrar/cancelar OAuth y prueba de rendimiento: no dejar procesos o tokens temporales. Cancelar/reiniciar precarga repetidamente: no pisar temporales de otra instancia.
++11. Crear una carpeta .rclone-bind-test preexistente con archivos y ejecutar benchmark: debe mantenerse intacta.
++12. Reboot/autostart antes y después del desbloqueo, red ausente, módulo deshabilitado y reinstalación. Comprobar candados y procesos supervivientes.
++
++## Rendimiento reproducible
++- Comparar original y revisión en el mismo dispositivo/red/backend con 5 repeticiones por escenario, sin mezclar cache fría/caliente.
++- Medir apertura y carga de la app/juego objetivo, listado de 1k/10k archivos, lecturas secuenciales y aleatorias, archivos pequeños/grandes y subida confirmada remotamente.
++- Registrar latencia mediana/p95, MB/s, RSS de rclone y app, CPU, temperatura, consumo de batería, espacio, errores/reintentos y peticiones facturables S3.
++- Probar perfiles balanced/max y precarga activada/desactivada. El watcher más lento reduce frecuencia de sondeo pero aumenta demora de recuperación.
++- No vaciar page cache global ni hacer drop_caches en el uso normal. Para pruebas frías usar remotos/contenidos nuevos o metodología aislada documentada.
++- Criterio de aceptación: cero corrupción/pérdida, firma/permisos correctos, sin OOM ni procesos huérfanos, montaje visible en la app objetivo y mejoras medidas sin regressiones graves. Si falla cualquiera, no publicar como estable.
+--- a/module/customize.sh
++++ b/module/customize.sh
+@@ -1,4 +1,6 @@
+ SKIPUNZIP=0
++[ -f "$MODPATH/bin/rclone" ] || abort "Falta bin/rclone: este ZIP no es un modulo compilado"
++[ -f "$MODPATH/bin/fusermount3" ] || abort "Falta bin/fusermount3"
+ 
+ ui_print "- Instalando RClone FTP Bind"
+ 
+@@ -18,6 +20,9 @@
+     cp -a "$OLD_CONFIG/." "$MODPATH/config/"
+     ui_print "- Configuración anterior conservada"
+ fi
++
++chmod 700 "$MODPATH/config"
++chmod 600 "$MODPATH/config/"* 2>/dev/null
+ 
+ # rclone (binario Go estático) resuelve DNS leyendo /etc/resolv.conf, que
+ # Android no trae: sin él, Google Drive falla con "lookup ... on [::1]:53".
+--- a/module/module.prop
++++ b/module/module.prop
+@@ -1,7 +1,6 @@
+ id=rclone_ftp_bind
+ name=RClone FTP Bind
+-version=v1.9.8
+-versionCode=46
++version=v1.9.9-review1
++versionCode=47
+ author=you
+ description=Monta un remoto (FTP, Google Drive o S3) via rclone y lo expone como bind en el almacenamiento interno.
+-updateJson=https://github.com/jpmorales9038-ai/ftp_bind_project/releases/latest/download/update.json
+--- a/module/scripts/check_remote.sh
++++ b/module/scripts/check_remote.sh
+@@ -6,6 +6,8 @@
+ # Sale con 0 si funciona; si no, imprime el error de rclone.
+ SELF="$(readlink -f "$0")"
+ MODDIR=$(dirname "$(dirname "$SELF")")
++. "$MODDIR/scripts/common.sh"
++enter_global_namespace "$@"
+ . "$MODDIR/scripts/env.sh"
+ 
+ [ -z "$1" ] && { echo "Falta el nombre del remoto"; exit 2; }
+@@ -14,10 +16,7 @@
+ . "$MODDIR/scripts/perf_opts.sh"
+ ROOT="$(remote_root "$1")"
+ 
+-LIMIT=""
+-command -v timeout >/dev/null 2>&1 && LIMIT="timeout 60"
+-
+-$LIMIT "$MODDIR/bin/rclone" lsd "$1:$ROOT" --max-depth 1 \
++run_timeout 60 "$MODDIR/bin/rclone" lsd "$1:$ROOT" --max-depth 1 \
+     --config "$RCLONE_CONF" \
+     --contimeout 15s --timeout 30s --retries 1 --low-level-retries 1 \
+     --log-level ERROR >/dev/null
+--- a/module/scripts/clear_cache.sh
++++ b/module/scripts/clear_cache.sh
+@@ -8,6 +8,17 @@
+ SELF="$(readlink -f "$0")"
+ MODDIR=$(dirname "$(dirname "$SELF")")
+ CACHE_DIR="$MODDIR/cache"
++. "$MODDIR/scripts/common.sh"
++enter_global_namespace "$@"
++acquire_operation_lock
++if is_mount_at /data/local/tmp/rclone_ftp || pgrep -f "$MODDIR/bin/rclone mount" >/dev/null 2>&1; then
++    echo "ERROR: rclone/FUSE sigue activo"; exit 1
++fi
++# vfsMeta may contain recovery information for unuploaded writes. Refuse
++# deletion rather than infer safety from a stale mounted:false flag.
++if [ -d "$CACHE_DIR/vfsMeta" ] && [ -n "$(find "$CACHE_DIR/vfsMeta" -type f -print -quit 2>/dev/null)" ]; then
++    echo "ERROR: hay metadatos VFS recuperables; monta y sincroniza antes de limpiar"; exit 1
++fi
+ STATUS_FILE="$MODDIR/status.json"
+ 
+ if grep -q '"mounted":true' "$STATUS_FILE" 2>/dev/null; then
+--- /dev/null
++++ b/module/scripts/common.sh
+@@ -0,0 +1,90 @@
++# Shared helpers; source only after MODDIR is set. No system-wide tuning.
++umask 077
++export LC_ALL=C
++mkdir -p "$MODDIR/config"
++chmod 700 "$MODDIR/config" 2>/dev/null
++
++enter_global_namespace() {
++    _self_ns=$(readlink /proc/self/ns/mnt 2>/dev/null)
++    _init_ns=$(readlink /proc/1/ns/mnt 2>/dev/null)
++    [ -n "$_self_ns" ] && [ -n "$_init_ns" ] || { echo "ERROR: namespace no disponible"; exit 1; }
++    [ "$_self_ns" = "$_init_ns" ] && return 0
++    [ "${RCB_NS_ENTERED:-0}" = 0 ] || { echo "ERROR: nsenter no cambio el namespace"; exit 1; }
++    command -v nsenter >/dev/null 2>&1 || { echo "ERROR: falta nsenter"; exit 1; }
++    export RCB_NS_ENTERED=1
++    exec nsenter -t 1 -m -- sh "$SELF" "$@"
++}
++
++# Atomic mkdir lock. Fail closed on stale locks; service.sh clears these at boot.
++acquire_operation_lock() {
++    OP_LOCK="$MODDIR/operation.lock"
++    mkdir "$OP_LOCK" 2>/dev/null || { echo "ERROR: otra operacion en curso (o candado obsoleto; reinicia)"; exit 1; }
++    echo "$$" > "$OP_LOCK/pid"
++    trap 'rm -rf "$OP_LOCK"' EXIT
++    trap 'exit 130' INT
++    trap 'exit 143' TERM HUP
++}
++
++# Match /proc/mounts fields literally; paths with spaces are kernel-escaped.
++is_mount_at() {
++    _mp=$(readlink -f "$1" 2>/dev/null) || return 1
++    _mp=$(printf '%s' "$_mp" | sed 's/ /\\040/g')
++    RCB_MOUNT_QUERY="$_mp" awk '$2==ENVIRON["RCB_MOUNT_QUERY"] {found=1} END {exit !found}' /proc/mounts
++}
++
++valid_target() {
++    case "$1" in
++        /sdcard/*|/storage/emulated/0/*|/storage/self/primary/*|/data/media/0/*) ;;
++        *) return 1 ;;
++    esac
++    case "$1" in *'"'*|*'\'*|*'//'*) return 1 ;; esac
++    _safe=$(printf '%s' "$1" | tr -d '[:cntrl:]')
++    [ "$_safe" = "$1" ] || return 1
++    case "/${1#/}/" in */../*|*/./*) return 1 ;; esac
++    return 0
++}
++
++# Kill child processes before the parent, without broad pkill -f matches.
++stop_children() {
++    for _child in $(cat "/proc/$1/task/$1/children" 2>/dev/null); do
++        stop_children "$_child"
++        kill -TERM "$_child" 2>/dev/null
++    done
++    return 0
++}
++run_timeout() {
++    _limit=$1; shift
++    "$@" &
++    _cmd=$!
++    ( sleep "$_limit"; stop_children "$_cmd"; kill -TERM "$_cmd" 2>/dev/null ) &
++    _timer=$!
++    wait "$_cmd"; _result=$?
++    stop_children "$_timer"
++    kill "$_timer" 2>/dev/null
++    wait "$_timer" 2>/dev/null
++    [ "$_result" -eq 143 ] && return 124
++    return "$_result"
++}
++
++# Authenticated, loopback-only RC. A fixed port conflict fails the mount;
++# it must never silently attach to an unrelated rclone instance.
++setup_rc() {
++    RC_SECRET="$MODDIR/config/rc_secret"
++    if [ ! -s "$RC_SECRET" ]; then
++        od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$RC_SECRET.tmp" || return 1
++        [ "$(wc -c < "$RC_SECRET.tmp")" -eq 64 ] || return 1
++        chmod 600 "$RC_SECRET.tmp" && mv "$RC_SECRET.tmp" "$RC_SECRET" || return 1
++    fi
++    export RCLONE_RC_USER=rclonebind
++    export RCLONE_RC_PASS="$(cat "$RC_SECRET")"
++    export RCLONE_RC_ADDR=127.0.0.1:55783
++    [ -n "$RCLONE_RC_PASS" ]
++}
++rc_call() {
++    run_timeout 10 "$MODDIR/bin/rclone" rc "$@" \
++        --url http://127.0.0.1:55783 --user "$RCLONE_RC_USER" --pass "$RCLONE_RC_PASS" \
++        --contimeout 3s --timeout 5s
++}
++atomic_unmounted() {
++    printf '{"mounted":false}\n' > "$MODDIR/status.json.tmp" && mv "$MODDIR/status.json.tmp" "$MODDIR/status.json"
++}
+--- a/module/scripts/drive_auth.sh
++++ b/module/scripts/drive_auth.sh
+@@ -13,9 +13,8 @@
+ MODDIR=$(dirname "$(dirname "$SELF")")
+ 
+ # Mismo namespace global que mount.sh, para ver los mismos archivos de sistema.
+-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
+-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
+-fi
++. "$MODDIR/scripts/common.sh"
++enter_global_namespace "$@"
+ 
+ . "$MODDIR/scripts/env.sh"
+ 
+@@ -24,10 +23,6 @@
+ umask 077
+ : > "$OUT"
+ 
+-# Tope de 5 minutos por si el usuario abandona el navegador.
+-LIMIT=""
+-command -v timeout >/dev/null 2>&1 && LIMIT="timeout 300"
+-
+-# $LIMIT sin comillas a propósito (es un prefijo opcional).
+-$LIMIT "$MODDIR/bin/rclone" authorize drive "$@" --auth-no-open-browser >> "$OUT" 2>&1
++# Deadline works even on Android builds without timeout.
++run_timeout 300 "$MODDIR/bin/rclone" authorize drive "$@" --auth-no-open-browser >> "$OUT" 2>&1
+ echo "__EXIT:$?" >> "$OUT"
+--- a/module/scripts/env.sh
++++ b/module/scripts/env.sh
+@@ -24,18 +24,14 @@
+ [ -n "$CERT_DIRS" ] && export SSL_CERT_DIR="$CERT_DIRS"
+ unset CERT_DIRS
+ 
+-# Fallback DNS: rclone (Go estático) lee /etc/resolv.conf, que Android no trae
+-# (-> "lookup ... on [::1]:53: connection refused"). Si no hay nameservers,
+-# se superpone uno propio sobre /system/etc con overlayfs. No depende del
+-# overlay de módulos de KernelSU (que exige metamódulo en versiones recientes).
+-# Idempotente: tras montarse, el grep encuentra los nameservers y no repite.
+-if ! grep -qs '^nameserver' /system/etc/resolv.conf 2>/dev/null; then
+-    _E="$MODDIR/etc_overlay"
+-    mkdir -p "$_E/upper" "$_E/work"
+-    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$_E/upper/resolv.conf"
+-    chmod 644 "$_E/upper/resolv.conf"
+-    mount -t overlay overlay \
+-        -o "lowerdir=/system/etc,upperdir=$_E/upper,workdir=$_E/work" \
+-        /system/etc 2>/dev/null
+-    unset _E
++# Never overlay all of /system/etc. Only bind the resolver file when an
++# existing mount target is available. If missing, the module's system file
++# requires working systemless mounting (KernelSU metamodule where applicable).
++if ! grep -qs '^nameserver' /system/etc/resolv.conf; then
++    if [ -f /system/etc/resolv.conf ] && [ -f "$MODDIR/system/etc/resolv.conf" ]; then
++        mount --bind "$MODDIR/system/etc/resolv.conf" /system/etc/resolv.conf 2>/dev/null || :
++    fi
++    if ! grep -qs '^nameserver' /system/etc/resolv.conf; then
++        echo "AVISO: resolv.conf ausente; revisa el montaje systemless/DNS" >&2
++    fi
+ fi
+--- a/module/scripts/install_app.sh
++++ b/module/scripts/install_app.sh
+@@ -9,18 +9,18 @@
+ 
+ # Intenta instalar de dos formas: por ruta y por stdin. La segunda no exige
+ # que system_server pueda leer el archivo (útil si SELinux lo impide).
+-# -r reinstala conservando datos, -d permite bajar de versionCode.
++# -r reinstala conservando datos; no se fuerzan downgrades ni desinstalaciones.
+ _try_install() {
+     _apk="$1"; _log="$2"
+     _size=$(stat -c %s "$_apk" 2>/dev/null || wc -c < "$_apk")
+     for _c in "cmd package" "pm"; do
+-        _out=$($_c install -r -d "$_apk" 2>&1)
++        _out=$($_c install -r "$_apk" 2>&1)
+         echo "[$_c por ruta] $_out" >> "$_log"
+         case "$_out" in *Success*) return 0 ;; esac
+         case "$_out" in *UPDATE_INCOMPATIBLE*) LAST_ERR="$_out"; return 2 ;; esac
+         LAST_ERR="$_out"
+ 
+-        _out=$($_c install -r -d -S "$_size" < "$_apk" 2>&1)
++        _out=$($_c install -r -S "$_size" < "$_apk" 2>&1)
+         echo "[$_c por stdin] $_out" >> "$_log"
+         case "$_out" in *Success*) return 0 ;; esac
+         case "$_out" in *UPDATE_INCOMPATIBLE*) LAST_ERR="$_out"; return 2 ;; esac
+@@ -35,14 +35,9 @@
+     _try_install "$_apk" "$_log"
+     _rc=$?
+ 
+-    # Único caso en que se desinstala: la firma del APK instalado no
+-    # coincide con la nueva (builds viejos firmados con claves al azar).
+-    # Se pierden los datos de la app, pero no hay otra forma de reemplazarla.
+     if [ "$_rc" = "2" ]; then
+-        echo "Firma distinta: desinstalando la versión anterior" >> "$_log"
+-        cmd package uninstall "$APP_PKG" >> "$_log" 2>&1 || pm uninstall "$APP_PKG" >> "$_log" 2>&1
+-        _try_install "$_apk" "$_log"
+-        _rc=$?
++        echo "Firma incompatible: NO se desinstala ni se borran datos. Usa una firma compatible o respalda y desinstala manualmente." >> "$_log"
++        return 1
+     fi
+ 
+     [ "$_rc" = "0" ] && return 0
+--- a/module/scripts/mount.sh
++++ b/module/scripts/mount.sh
+@@ -11,9 +11,9 @@
+ # "dice que monta pero no aparecen los archivos". Forzamos re-ejecutar
+ # este script ya adentro del namespace de PID 1 para que el mount se
+ # propague a todo el sistema.
+-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
+-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
+-fi
++. "$MODDIR/scripts/common.sh"
++enter_global_namespace "$@"
++acquire_operation_lock
+ 
+ RCLONE_BIN="$MODDIR/bin/rclone"
+ RCLONE_CONF="$MODDIR/config/rclone.conf"
+@@ -27,6 +27,20 @@
+ # la app (config/target_path); sin ese archivo se usa la de siempre.
+ TARGET_PATH="$(cat "$MODDIR/config/target_path" 2>/dev/null)"
+ [ -z "$TARGET_PATH" ] && TARGET_PATH="/sdcard/FTP"
++valid_target "$TARGET_PATH" || { echo "ERROR: destino fuera del almacenamiento o caracteres no admitidos"; exit 1; }
++if is_mount_at /data/local/tmp/rclone_ftp; then
++    echo "ERROR: ya hay un FUSE activo; desmonta antes de volver a montar"
++    exit 1
++fi
++# Bound log growth between mounts without truncating an active writer.
++LOG_BYTES=$(stat -c %s "$LOG_FILE" 2>/dev/null)
++case "$LOG_BYTES" in ''|*[!0-9]*) LOG_BYTES=0 ;; esac
++if [ "$LOG_BYTES" -gt 4194304 ]; then
++    tail -n 2000 "$LOG_FILE" > "$LOG_FILE.trim" && mv "$LOG_FILE.trim" "$LOG_FILE"
++fi
++[ -x "$RCLONE_BIN" ] && [ -x "$MODDIR/bin/fusermount3" ] || { echo "ERROR: faltan rclone/fusermount3 ejecutables"; exit 1; }
++[ -c /dev/fuse ] || { echo "ERROR: /dev/fuse no disponible"; exit 1; }
++setup_rc || { echo "ERROR: no se pudo configurar RC"; exit 1; }
+ 
+ # HOME, PATH (fusermount3) y certificados TLS para rclone: ver env.sh.
+ . "$MODDIR/scripts/env.sh"
+@@ -40,6 +54,7 @@
+ # "remote", el nombre que usaban las versiones con un solo servidor.
+ ACTIVE="$(cat "$MODDIR/config/active" 2>/dev/null)"
+ [ -z "$ACTIVE" ] && ACTIVE="remote"
++case "$ACTIVE" in ''|-*|*[!a-zA-Z0-9_.+@\ -]*) echo "ERROR: nombre remoto invalido"; exit 1 ;; esac
+ . "$MODDIR/scripts/perf_opts.sh"
+ if [ -z "$(remote_type "$ACTIVE")" ]; then
+     echo "$(date): No existe el servidor '$ACTIVE' en rclone.conf" >> "$LOG_FILE"
+@@ -59,6 +74,12 @@
+ # RAM_CACHE_DIR (no el archivo de config, que solo expresa lo que se pidió) —
+ # así perf_test.sh puede saberlo con una simple lectura de /proc/mounts.
+ RAM_CACHE_DIR="$MODDIR/cache_ram"
++if [ "$(cat "$MODDIR/config/ram_cache" 2>/dev/null)" = 1 ] &&
++   [ -d "$MODDIR/cache/vfsMeta" ] &&
++   [ -n "$(find "$MODDIR/cache/vfsMeta" -type f -print -quit 2>/dev/null)" ]; then
++    echo "ERROR: caché VFS en disco recuperable; usa disco y sincroniza antes de activar RAM"
++    exit 1
++fi
+ if [ "$PERF" = max ] && [ "$(cat "$MODDIR/config/ram_cache" 2>/dev/null)" = "1" ]; then
+     AVAIL_KB="$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null)"
+     case "$AVAIL_KB" in ''|*[!0-9]*) AVAIL_KB=0 ;; esac
+@@ -78,6 +99,8 @@
+         fi
+         if grep -q " $RAM_CACHE_DIR tmpfs" /proc/mounts; then
+             CACHE_DIR="$RAM_CACHE_DIR"
++            # Volatile VFS must not hold the only copy of pending writes.
++            MOUNT_OPTS="$MOUNT_OPTS --read-only"
+             echo "$(date): Caché en RAM activa (${CACHE_GB:-10}G, ${AVAIL_MB}M libres)" >> "$LOG_FILE"
+         else
+             echo "$(date): No se pudo montar el tmpfs de caché en RAM, se usa disco" >> "$LOG_FILE"
+@@ -91,8 +114,8 @@
+ mkdir -p "$RCLONE_MOUNTPOINT"
+ # Estado actual: el montaje FUSE de rclone y el bind sobre /sdcard/FTP son
+ # dos cosas distintas. Si un intento anterior dejó el FUSE pero no el bind,
+-# solo hay que completar el bind.
+-is_fuse_mounted() { grep -q " $RCLONE_MOUNTPOINT " /proc/mounts; }
++# se exige desmontar primero para no reutilizar opciones/remotos antiguos.
++is_fuse_mounted() { is_mount_at "$RCLONE_MOUNTPOINT"; }
+ 
+ # OJO: /proc/mounts muestra la ruta REAL ya resuelta (/sdcard es un symlink
+ # a /storage/emulated/0 o similar), nunca "/sdcard/FTP". Buscar ese texto
+@@ -108,7 +131,9 @@
+ 
+ try_bind() {
+     # $1 = ruta destino a probar
+-    mkdir -p "$1" 2>>"$LOG_FILE"
++    mkdir -p "$1" 2>>"$LOG_FILE" || return 1
++    _real=$(readlink -f "$1")
++    valid_target "$_real" || { echo "ERROR: destino resuelto no seguro: $_real" >&2; return 1; }
+     is_bound_at "$1" && return 0
+     err="$(mount --bind "$RCLONE_MOUNTPOINT" "$1" 2>&1)" || \
+         echo "$(date): mount --bind hacia $1 falló: $err" >> "$LOG_FILE"
+@@ -139,7 +164,7 @@
+     fi
+     # Se guarda la ruta REAL usada: unmount.sh debe apuntar a esta aunque
+     # el usuario cambie la ruta desde la app mientras sigue montado.
+-    echo "{\"mounted\":true,\"remote\":\"$ACTIVE\",\"target\":\"$USED\"}" > "$STATUS_FILE"
++    printf '{"mounted":true,"remote":"%s","target":"%s"}\n' "$ACTIVE" "$USED" > "$STATUS_FILE.tmp" && mv "$STATUS_FILE.tmp" "$STATUS_FILE"
+     echo "$(date): '$ACTIVE' montado correctamente en $USED" >> "$LOG_FILE"
+     # Vigila el bind y lo rehace si algo (p. ej. el launcher del juego) lo
+     # quita. Stdio a /dev/null para no dejar colgada la shell root de la app.
+@@ -158,7 +183,7 @@
+     # precargar en vez de los que había (visto en mount.log: dos líneas
+     # "Precarga: ..." con un total distinto en el mismo segundo). Se espera
+     # hasta 5s a que el propio trap de salida de preload.sh suelte el
+-    # candado antes de forzar el borrado y lanzar la nueva; todo en segundo
++    # candado antes de lanzar la nueva; si sigue ocupado, no se borra; todo en segundo
+     # plano para no demorar la confirmación de montaje.
+     pkill -f "$MODDIR/scripts/preload.sh" 2>/dev/null
+     (
+@@ -167,7 +192,7 @@
+             sleep 1
+             i=$((i + 1))
+         done
+-        rm -rf "$MODDIR/preload.lock"
++        [ -d "$MODDIR/preload.lock" ] && exit 0
+         sh "$MODDIR/scripts/preload.sh" </dev/null >/dev/null 2>&1
+     ) &
+ 
+@@ -189,12 +214,17 @@
+     --config "$RCLONE_CONF" \
+     --cache-dir "$CACHE_DIR" \
+     --allow-other \
++    --rc \
+     $MOUNT_OPTS \
+     --daemon \
+     --log-file "$LOG_FILE" \
+     --log-level INFO
+ 
+-sleep 2
++i=0
++while ! is_fuse_mounted && [ "$i" -lt 10 ]; do
++    sleep 1
++    i=$((i + 1))
++done
+ 
+ if is_fuse_mounted; then
+     do_bind
+--- a/module/scripts/perf_test.sh
++++ b/module/scripts/perf_test.sh
+@@ -20,9 +20,8 @@
+ 
+ # Debe correr en el namespace global (PID 1), igual que mount.sh: así ve el bind
+ # tal como lo ve el resto del sistema.
+-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
+-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
+-fi
++. "$MODDIR/scripts/common.sh"
++enter_global_namespace "$@"
+ 
+ OUT="$MODDIR/perf_test.out"
+ STATUS_FILE="$MODDIR/status.json"
+@@ -41,10 +40,11 @@
+ WORST=OK
+ TDIR=""
+ 
++mkdir "$MODDIR/perf_test.lock" 2>/dev/null || exit 1
+ : > "$OUT"
+ 
+ # Si la app corta la prueba a la mitad no debe quedar el archivo temporal.
+-cleanup() { [ -n "$TDIR" ] && rm -rf "$TDIR" 2>/dev/null; }
++cleanup() { [ -n "$TDIR" ] && rm -rf "$TDIR" 2>/dev/null; rmdir "$MODDIR/perf_test.lock" 2>/dev/null; }
+ trap cleanup EXIT
+ trap 'exit 1' INT TERM HUP
+ 
+@@ -71,11 +71,13 @@
+ }
+ 
+ # Milisegundos. Si el date del sistema no soporta %N se cae a segundos.
++# Keep times below 2^31 for Android mksh. Test deadlines are well below
++# the ~11 day modulus; a boundary crossing is reported as an invalid sample.
+ now_ms() {
+     n="$(date +%s%N 2>/dev/null)"
+     case "$n" in
+-        ''|*[!0-9]*) echo $(( $(date +%s) * 1000 )) ;;
+-        *) echo "${n%??????}" ;;
++        ''|*[!0-9]*) date +%s | awk '{printf "%.0f\n", ($1 % 1000000) * 1000}' ;;
++        *) printf '%s\n' "$n" | awk '{printf "%.0f\n", int(($1 / 1000000) % 1000000000)}' ;;
+     esac
+ }
+ 
+@@ -92,7 +94,7 @@
+ tmo() {
+     s="$1"
+     shift
+-    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi
++    run_timeout "$s" "$@"
+ }
+ 
+ # KB que ocupa la caché de rclone en disco.
+@@ -299,22 +301,25 @@
+     step list OK "$N1 elementos. Primer listado $L1 ms, segundo $L2 ms."
+ fi
+ 
+-# ---------------------------------------------------------------- write
++# ----------------------------------------------------------------- write
+ step write RUN "Escribiendo $TEST_MB MB de prueba"
+-TDIR="$T/.rclone-bind-test"
++TDIR="$T/.rclone-bind-test-$$"
+ WS=""
+ RS=""
+-if ! mkdir -p "$TDIR" 2>/dev/null; then
++if [ "$CACHE_IS_RAM" = 1 ] || [ "$(remote_key "$REMOTE" scope)" = drive.readonly ]; then
++    step write SKIP "Montaje de solo lectura; no se escriben temporales."
++    TDIR=""
++elif ! mkdir "$TDIR" 2>/dev/null; then
+     step write WARN "No se pudo crear la carpeta de prueba (¿servidor de solo lectura?). Se omite la escritura."
+ else
+     t0=$(now_ms)
+-    dd if=/dev/zero of="$TDIR/w.bin" bs=1048576 count=$TEST_MB 2>/dev/null
++    tmo 60 dd if=/dev/zero of="$TDIR/w.bin" bs=1048576 count=$TEST_MB 2>/dev/null
+     rc=$?
+     t1=$(now_ms)
+-    dd if="$TDIR/w.bin" of=/dev/null bs=1048576 2>/dev/null
++    tmo 60 dd if="$TDIR/w.bin" of=/dev/null bs=1048576 2>/dev/null
+     t2=$(now_ms)
+     SZ="$(stat -c %s "$TDIR/w.bin" 2>/dev/null)"
+-    # Se borra enseguida: así el archivo no llega a subirse a la nube.
++    # Limpieza rápida: no garantiza que el backend no haya visto el temporal.
+     rm -rf "$TDIR" 2>/dev/null
+     TDIR=""
+     if [ "$rc" != 0 ] || [ "$SZ" != $(( TEST_MB * 1048576 )) ]; then
+@@ -379,7 +384,6 @@
+ # allocation): medir con du -sk justo después de leer casi siempre da 0
+ # aunque la caché SÍ esté funcionando. "sync" fuerza el writeback pendiente
+ # antes de medir (no afecta la velocidad reportada: se mide antes de esto).
+-sync
+ sleep 1
+ C1=$(cache_kb)
+ 
+--- a/module/scripts/preload.sh
++++ b/module/scripts/preload.sh
+@@ -20,12 +20,11 @@
+ # entran en el presupuesto se decide antes, en un solo hilo, para que repartir
+ # el trabajo entre los workers no tenga condiciones de carrera.
+ #
+-# No repite trabajo ya hecho: si la caché sigue en disco (no en RAM, que se
+-# pierde al desmontar), conserva casi todo su tamaño y el remoto tiene la misma
+-# cantidad de archivos y el mismo tamaño total que la última precarga
+-# completa, se omite. clear_cache.sh
+-# borra esta marca al vaciar la caché, así que un remonte tras limpiarla
+-# vuelve a precargar todo.
++# Comprueba siempre los archivos seleccionados: cantidad/tamaño total no
++# prueban que el contenido siga igual. Una entrada válida en VFS se sirve
++# desde la caché sin volver a descargar, según las comprobaciones de rclone.
++# Los nombres con saltos de línea todavía no están soportados por las listas
++# de rutas de este script; evita usarlos en los remotos destinados a precarga.
+ #
+ # Respeta el tamaño de caché configurado (deja 512 MB de margen) y tiene
+ # topes de tiempo y de cantidad de archivos por seguridad, para no quedarse
+@@ -44,25 +43,19 @@
+ MODDIR=$(dirname "$(dirname "$SELF")")
+ FORCE="$1"
+ 
+-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
+-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
+-fi
++. "$MODDIR/scripts/common.sh"
++enter_global_namespace "$@"
+ 
+ LOG_FILE="$MODDIR/mount.log"
+ STATUS_FILE="$MODDIR/status.json"
+ RCLONE_CONF="$MODDIR/config/rclone.conf"
+ PRELOAD_STATUS="$MODDIR/preload_status.json"
+ 
+-# Restos de una corrida anterior que no terminó bien (el móvil se reinició a
+-# la mitad, por ejemplo). No son el candado: ese se trata aparte.
+-rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
+-      "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done 2>/dev/null
+-
+-# Tamaño de un archivo en MB enteros. Se calcula con awk y no con $(( )): el
++# Tamaño de un archivo en MB, redondeado hacia arriba para presupuestar archivos pequeños. Se calcula con awk y no con $(( )): el
+ # mksh de Android hace la aritmética en 32 bits con signo, y un archivo de más
+ # de 2 GiB daba MB negativos (p. ej. -1581 para uno de 2515 MB).
+ file_mb() {
+-    stat -c %s "$1" 2>/dev/null | awk '{printf "%d", $1 / 1048576}'
++    stat -c %s "$1" 2>/dev/null | awk '{printf "%.0f", int(($1 + 1048575) / 1048576)}'
+ }
+ 
+ # Escribe preload_status.json de forma atómica (tmp + mv) para que la app,
+@@ -74,15 +67,22 @@
+         > "$PRELOAD_STATUS.tmp" 2>/dev/null && mv "$PRELOAD_STATUS.tmp" "$PRELOAD_STATUS"
+ }
+ 
+-# Evita dos precargas a la vez (p. ej. dos montajes seguidos). mount.sh ya
+-# limpia este candado antes de lanzar una nueva, así que uno viejo colgado
+-# aquí es de un proceso que sigue vivo de verdad.
++# Evita dos precargas a la vez. Solo quien obtuvo el candado limpia los
++# temporales. Un candado obsoleto se recupera al reiniciar, nunca a ciegas.
+ LOCK="$MODDIR/preload.lock"
+ mkdir "$LOCK" 2>/dev/null || exit 0
++# Restos de una corrida anterior que no terminó bien (el móvil se reinició a
++# la mitad, por ejemplo). No son el candado: ese se trata aparte.
++rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
++      "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done 2>/dev/null
++
+ trap '[ -n "$MONITOR_PID" ] && kill "$MONITOR_PID" 2>/dev/null
++      for pid in $WPIDS; do stop_children "$pid"; kill -TERM "$pid" 2>/dev/null; done
+       rm -rf "$LOCK"
+       rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
+-            "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done' EXIT INT TERM HUP
++            "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done' EXIT
++trap 'exit 130' INT
++trap 'exit 143' TERM HUP
+ 
+ ACTIVE="$(sed -n 's/.*"remote":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
+ T="$(sed -n 's/.*"target":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
+@@ -124,6 +124,11 @@
+ WORKERS="$(cat "$MODDIR/config/preload_workers" 2>/dev/null)"
+ case "$WORKERS" in ''|*[!0-9]*|0) WORKERS=4 ;; esac
+ [ "$WORKERS" -gt 8 ] && WORKERS=8
++MEM_KB=$(awk '/MemAvailable/{print $2}' /proc/meminfo)
++case "$MEM_KB" in ''|*[!0-9]*) MEM_KB=0 ;; esac
++[ "$MEM_KB" -ge 1048576 ] || WORKERS=1
++[ "$MEM_KB" -ge 2097152 ] || { [ "$WORKERS" -le 2 ] || WORKERS=2; }
++command -v renice >/dev/null 2>&1 && renice 10 -p "$$" >/dev/null 2>&1
+ 
+ # Tope de tiempo por archivo: 300 s como mínimo, y 4 s por MB para los
+ # grandes (equivale a aguantar hasta ~0,25 MB/s). Un tope fijo cortaba a
+@@ -135,21 +140,10 @@
+ # para pgrep ese proceso sigue "vivo" aunque no avance nada). TERM primero;
+ # si a los 2s sigue ahí (bloqueado en E/S, donde TERM no siempre alcanza),
+ # remata con KILL.
+-run_with_timeout() {
+-    tl="$1"; shift
+-    "$@" &
+-    cpid=$!
+-    ( sleep "$tl"; kill -TERM "$cpid" 2>/dev/null; sleep 2; kill -KILL "$cpid" 2>/dev/null ) &
+-    wpid=$!
+-    wait "$cpid" 2>/dev/null
+-    rc=$?
+-    kill "$wpid" 2>/dev/null
+-    wait "$wpid" 2>/dev/null
+-    return "$rc"
+-}
++run_with_timeout() { run_timeout "$@"; }
+ 
+ FILELIST="$MODDIR/.preload_list"
+-find "$T" -type f -not -path '*/.rclone-bind-test/*' 2>/dev/null | sort > "$FILELIST"
++find "$T" -type f -not -path '*/.rclone-bind-test*/*' 2>/dev/null | sort > "$FILELIST"
+ TOTAL="$(wc -l < "$FILELIST" 2>/dev/null | tr -d ' ')"
+ [ -z "$TOTAL" ] && TOTAL=0
+ 
+@@ -164,29 +158,9 @@
+ # (--vfs-cache-max-age) o por espacio, y sin esta comprobación se diría "ya
+ # estaba precargado" con la caché vacía.
+ CACHE_VFS="$MODDIR/cache/vfs"
++# Count + size cannot prove identical content or cache coverage. Always
++# traverse selected files; valid VFS cache serves these without re-download.
+ MARKER_OK=0
+-if [ "$FORCE" != "force" ] && [ "$CACHE_IS_RAM" = 0 ] && [ -f "$MARKER" ]; then
+-    set -- $(cat "$MARKER" 2>/dev/null)
+-    if [ "$1 $2" = "$FP_NOW" ]; then
+-        case "$3" in
+-            ''|*[!0-9]*) ;;
+-            *)
+-                CUR_KB="$(du -sk "$CACHE_VFS" 2>/dev/null | awk '{print $1}')"
+-                case "$CUR_KB" in ''|*[!0-9]*) CUR_KB=0 ;; esac
+-                [ "$3" -gt 0 ] && [ "$CUR_KB" -ge $(( $3 * 9 / 10 )) ] && MARKER_OK=1
+-                ;;
+-        esac
+-    fi
+-fi
+-
+-if [ "$MARKER_OK" = 1 ]; then
+-    echo "$(date): Precarga: '$ACTIVE' ya estaba precargado por completo (sin cambios), se omite" >> "$LOG_FILE"
+-    N_SELECTED="$TOTAL"
+-    DONE_MB="$(( $(printf '%s' "$FP_NOW" | awk '{print $2}') / 1024 ))"
+-    write_status false "$TOTAL" "$DONE_MB"
+-    exit 0
+-fi
+-
+ # Tope de archivos por corrida (config/preload_max_files; por defecto 20000,
+ # antes fijo en 2000). Un mod grande de GTA o un juego Unity/Unreal con
+ # miles de texturas y audios sueltos supera 2000 archivos sin acercarse al
+@@ -312,6 +286,5 @@
+ # cambió, no vuelve a bajar lo que ya está en disco.
+ if [ "$CACHE_IS_RAM" = 0 ] && [ "$PN" = "$TOTAL" ] && [ "$TOTAL" -gt 0 ]; then
+     mkdir -p "$MODDIR/config" 2>/dev/null
+-    sync
+     echo "$FP_NOW $(du -sk "$CACHE_VFS" 2>/dev/null | awk '{print $1+0}')" > "$MARKER"
+ fi
+--- /dev/null
++++ b/module/scripts/status.sh
+@@ -0,0 +1,10 @@
++#!/system/bin/sh
++SELF="$(readlink -f "$0")"
++MODDIR=$(dirname "$(dirname "$SELF")")
++. "$MODDIR/scripts/common.sh"
++enter_global_namespace "$@"
++if ! is_mount_at /data/local/tmp/rclone_ftp; then
++    printf '{"mounted":false}\n'
++else
++    cat "$MODDIR/status.json" 2>/dev/null || printf '{"mounted":false}\n'
++fi
+--- a/module/scripts/unmount.sh
++++ b/module/scripts/unmount.sh
+@@ -1,55 +1,56 @@
+ #!/system/bin/sh
+ SELF="$(readlink -f "$0")"
+ MODDIR=$(dirname "$(dirname "$SELF")")
+-
+-# Mismo motivo que en mount.sh: forzar el namespace global de PID 1 para
+-# que el umount le pegue al mount real, no a una vista privada del proceso.
+-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
+-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
+-fi
+-
++. "$MODDIR/scripts/common.sh"
++enter_global_namespace "$@"
++acquire_operation_lock
++. "$MODDIR/scripts/env.sh"
+ LOG_FILE="$MODDIR/mount.log"
+ STATUS_FILE="$MODDIR/status.json"
+-
+ RCLONE_MOUNTPOINT="/data/local/tmp/rclone_ftp"
+-
+-# Prioridad: la ruta que quedó realmente montada (guardada en status.json al
+-# montar) por si config/target_path cambió después sin volver a montar;
+-# si no hay status, se usa la de config, y si tampoco, la de siempre.
+ TARGET_PATH="$(sed -n 's/.*"target":"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null)"
+-if [ -z "$TARGET_PATH" ]; then
+-    TARGET_PATH="$(cat "$MODDIR/config/target_path" 2>/dev/null)"
++if is_mount_at "$RCLONE_MOUNTPOINT"; then
++    valid_target "$TARGET_PATH" || { echo "ERROR: destino desconocido; no se desmonta a ciegas"; exit 1; }
++    setup_rc || exit 1
++    # No force mode: open writers or failed uploads leave the mount intact.
++    n=0
++    while :; do
++        stats=$(rc_call vfs/stats 2>>"$LOG_FILE") || { echo "ERROR: no se puede comprobar la cola VFS; montaje conservado"; exit 1; }
++        pending=$(printf '%s\n' "$stats" | awk '
++            /"(uploadsQueued|uploadsInProgress|erroredFiles|inUse)"[ \t]*:/ {
++                v=$0; sub(/.*:[ \t]*/,"",v); sub(/,.*/,"",v)
++                if (v !~ /^[0-9]+[ \t]*$/) bad=1
++                sum+=v; count++
++            }
++            END {if (bad || count!=4) print "unknown"; else print sum+0}')
++        [ "$pending" = 0 ] && break
++        [ "$pending" = unknown ] && { echo "ERROR: respuesta VFS incompatible; montaje conservado"; exit 1; }
++        [ "$n" -ge 30 ] && { echo "ERROR: quedan archivos abiertos/subidas pendientes; cierra las apps y reintenta"; exit 1; }
++        sleep 2; n=$((n + 1))
++    done
++    # Stop only this module's helpers, and their children.
++    for helper in watch.sh preload.sh perf_test.sh; do
++        for pid in $(pgrep -f "$MODDIR/scripts/$helper" 2>/dev/null); do
++            stop_children "$pid"; kill -TERM "$pid" 2>/dev/null
++        done
++    done
++    a=$(stat -c %d "$TARGET_PATH" 2>/dev/null)
++    b=$(stat -c %d "$RCLONE_MOUNTPOINT" 2>/dev/null)
++    if [ -n "$a" ] && [ "$a" = "$b" ]; then
++        umount "$TARGET_PATH" 2>>"$LOG_FILE" || { sh "$MODDIR/scripts/watch.sh" </dev/null >/dev/null 2>&1 &
++            echo "ERROR: bind ocupado; montaje conservado"; exit 1; }
++    fi
++    umount "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || {
++        mount --bind "$RCLONE_MOUNTPOINT" "$TARGET_PATH" 2>>"$LOG_FILE"
++        sh "$MODDIR/scripts/watch.sh" </dev/null >/dev/null 2>&1 &
++        echo "ERROR: FUSE ocupado; desmontaje rechazado"; exit 1;
++    }
+ fi
+-[ -z "$TARGET_PATH" ] && TARGET_PATH="/sdcard/FTP"
+-
+-# Primero se marca como desmontado y se detiene el watcher; si no, volvería
+-# a crear el bind apenas se quite.
+-echo '{"mounted":false}' > "$STATUS_FILE"
+-[ -f "$MODDIR/watch.pid" ] && kill "$(cat "$MODDIR/watch.pid")" 2>/dev/null
++is_mount_at "$RCLONE_MOUNTPOINT" && { echo "ERROR: FUSE aun activo"; exit 1; }
++# Do not kill rclone by command pattern; a clean unmount ends its mount loop.
++if is_mount_at "$MODDIR/cache_ram"; then
++    umount "$MODDIR/cache_ram" 2>>"$LOG_FILE" || { echo "ERROR: tmpfs ocupado"; exit 1; }
++fi
++atomic_unmounted
+ rm -f "$MODDIR/watch.pid"
+-
+-# Se desmonta en bucle: intentos anteriores pueden haber dejado varios binds
+-# apilados en la misma carpeta.
+-i=0
+-while [ "$i" -lt 10 ] && umount -l "$TARGET_PATH" 2>/dev/null; do
+-    i=$((i + 1))
+-done
+-umount -l "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || "$MODDIR/bin/fusermount3" -u "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE"
+-
+-# Por si el mount corre como proceso en background
+-pkill -f "$MODDIR/bin/rclone mount" 2>/dev/null
+-
+-# Corta la precarga automática si seguía corriendo: el mount ya no existe,
+-# seguir leyendo archivos ahí solo daría errores.
+-pkill -f "$MODDIR/scripts/preload.sh" 2>/dev/null
+-rm -rf "$MODDIR/preload.lock" "$MODDIR/.preload_list"
+-
+-# Libera la RAM de la caché en RAM (si estaba activa): el tmpfs es
+-# descartable, así que basta con desmontarlo.
+-RAM_CACHE_DIR="$MODDIR/cache_ram"
+-if grep -q " $RAM_CACHE_DIR tmpfs" /proc/mounts; then
+-    umount -l "$RAM_CACHE_DIR" 2>>"$LOG_FILE"
+-fi
+-
+-echo '{"mounted":false}' > "$STATUS_FILE"
+-echo "$(date): Desmontado" >> "$LOG_FILE"
++echo "$(date): Desmontado sin forzar; cola VFS vacia" >> "$LOG_FILE"
+--- a/module/scripts/watch.sh
++++ b/module/scripts/watch.sh
+@@ -3,9 +3,8 @@
+ MODDIR=$(dirname "$(dirname "$SELF")")
+ 
+ # Debe correr en el namespace global (PID 1), igual que mount.sh.
+-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
+-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
+-fi
++. "$MODDIR/scripts/common.sh"
++enter_global_namespace "$@"
+ 
+ LOG_FILE="$MODDIR/mount.log"
+ STATUS_FILE="$MODDIR/status.json"
+@@ -34,15 +33,18 @@
+         exit 0
+     fi
+ 
+-    a="$(stat -c %d "$T" 2>/dev/null)"
+-    b="$(stat -c %d "$RCLONE_MOUNTPOINT" 2>/dev/null)"
++    a="$(run_timeout 3 stat -c %d "$T" 2>/dev/null)"
++    b="$(run_timeout 3 stat -c %d "$RCLONE_MOUNTPOINT" 2>/dev/null)"
+     if [ -n "$b" ] && [ "$a" != "$b" ]; then
+         # Registra qué app estaba en primer plano: sirve para identificar
+         # quién quita el bind.
+         FOCUS="$(dumpsys window 2>/dev/null | grep -m1 mCurrentFocus)"
+         echo "$(date): watcher: el bind en $T desapareció; foco: $FOCUS" >> "$LOG_FILE"
++        if ! mkdir "$MODDIR/operation.lock" 2>/dev/null; then sleep 5; continue; fi
++        grep -q '"mounted":true' "$STATUS_FILE" || { rmdir "$MODDIR/operation.lock"; exit 0; }
+         err="$(mount --bind "$RCLONE_MOUNTPOINT" "$T" 2>&1)" || \
+             echo "$(date): watcher: rebind falló: $err" >> "$LOG_FILE"
++        rmdir "$MODDIR/operation.lock" 2>/dev/null
+     fi
+-    sleep 1
++    sleep 5
+ done
+--- a/module/service.sh
++++ b/module/service.sh
+@@ -1,5 +1,11 @@
+ #!/system/bin/sh
+ MODDIR=${0%/*}
++umask 077
++# Boot-only recovery: no processes from the previous boot can own these.
++rm -rf "$MODDIR/operation.lock" "$MODDIR/preload.lock" "$MODDIR/perf_test.lock"
++rm -f "$MODDIR/watch.pid"
++chmod 700 "$MODDIR/config" 2>/dev/null
++chmod 600 "$MODDIR/config/"* 2>/dev/null
+ 
+ while [ "$(getprop sys.boot_completed)" != "1" ]; do
+     sleep 1
+@@ -21,13 +27,14 @@
+     . "$MODDIR/scripts/install_app.sh"
+     cp "$APK_SRC" "$APK_TMP"
+     chmod 644 "$APK_TMP"
+-    if ! install_app "$APK_TMP" "$INSTALL_LOG"; then
++    if install_app "$APK_TMP" "$INSTALL_LOG"; then
++        rm -f "$NEEDS_MANUAL" "$APK_TMP"
++    else
+         am start -a android.intent.action.VIEW \
+             -d "file://$APK_TMP" \
+             -t application/vnd.android.package-archive \
+             -f 0x10000000 >> "$INSTALL_LOG" 2>&1
+     fi
+-    rm -f "$NEEDS_MANUAL"
+ fi
+ 
+ AUTOSTART_FLAG="$MODDIR/config/autostart"
+--- /dev/null
++++ b/tests/test_review.py
+@@ -0,0 +1,127 @@
++#!/usr/bin/env python3
++"""Host-only regression tests. Never mount, install, or execute supplied binaries."""
++import os, subprocess, tempfile, unittest
++from pathlib import Path
++ROOT = Path(__file__).resolve().parents[1]
++class ReviewTests(unittest.TestCase):
++ def shell(self, code, env=None):
++  return subprocess.run(['dash','-c',code],text=True,capture_output=True,env=env,timeout=15)
++ def test_all_shell_syntax(self):
++  for p in sorted((ROOT/'module').rglob('*.sh')):
++   with self.subTest(file=p.name):
++    r=subprocess.run(['dash','-n',str(p)],capture_output=True,text=True)
++    self.assertEqual(r.returncode,0,r.stderr)
++ def test_target_validation(self):
++  with tempfile.TemporaryDirectory() as d:
++   for path,expected in [('/sdcard/FTP',0),('/sdcard/Game Assets',0),('/data/media/0/test',0),('/system/etc',1),('/',1),('/sdcard/../data',1),('/sdcard/a"b',1),('/sdcard/a\\b',1),('/sdcard/a\nb',1),('/sdcard//test',1),('/sdcard/./test',1)]:
++    with self.subTest(path=path):
++     env=dict(os.environ,TEST_PATH=path,TEST_MOD=d)
++     r=self.shell(f'MODDIR="$TEST_MOD"; . "{ROOT}/module/scripts/common.sh"; valid_target "$TEST_PATH"',env)
++     self.assertEqual(r.returncode,expected,r.stdout+r.stderr)
++ def test_timeout_and_success(self):
++  with tempfile.TemporaryDirectory() as d:
++   base=f'MODDIR="{d}"; . "{ROOT}/module/scripts/common.sh"; '
++   self.assertEqual(self.shell(base+'run_timeout 2 sh -c "exit 7"').returncode,7)
++   self.assertEqual(self.shell(base+'run_timeout 1 sleep 5').returncode,124)
++ def test_operation_lock_exclusion(self):
++  with tempfile.TemporaryDirectory() as d:
++   Path(d,'operation.lock').mkdir()
++   r=self.shell(f'MODDIR="{d}"; . "{ROOT}/module/scripts/common.sh"; acquire_operation_lock')
++   self.assertEqual(r.returncode,1); self.assertTrue(Path(d,'operation.lock').exists())
++ def test_lock_cleanup(self):
++  with tempfile.TemporaryDirectory() as d:
++   r=self.shell(f'MODDIR="{d}"; . "{ROOT}/module/scripts/common.sh"; acquire_operation_lock; exit 0')
++   self.assertEqual(r.returncode,0); self.assertFalse(Path(d,'operation.lock').exists())
++ def test_rc_secret_permissions_and_reuse(self):
++  with tempfile.TemporaryDirectory() as d:
++   base=f'MODDIR="{d}"; . "{ROOT}/module/scripts/common.sh"; setup_rc'
++   self.assertEqual(self.shell(base).returncode,0)
++   p=Path(d,'config/rc_secret'); first=p.read_text()
++   self.assertEqual(len(first),64);self.assertEqual(p.stat().st_mode & 0o777,0o600)
++   self.assertEqual(self.shell(base).returncode,0);self.assertEqual(p.read_text(),first)
++ def test_remote_key_and_numeric_ranges(self):
++  with tempfile.TemporaryDirectory() as d:
++   conf=Path(d,'test.conf'); conf.write_bytes(b'[a.b]\r\ntype = s3\r\nbind_path = bucket/dir\r\n[aXb]\r\ntype = ftp\r\n')
++   base=f'MODDIR="{d}"; RCLONE_CONF="{conf}"; . "{ROOT}/module/scripts/perf_opts.sh"; '
++   self.assertEqual(self.shell(base+'remote_type a.b').stdout.strip(),'s3')
++   self.assertEqual(self.shell(base+'remote_root a.b').stdout.strip(),'bucket/dir')
++   for v,want in [('0004','4'),('999999999999999','2'),('x','2'),('0','2'),('17','2')]:
++    self.assertEqual(self.shell(base+f'num_in_range {v} 1 16 2').stdout.strip(),want)
++ def test_performance_matrix_with_fake_rclone(self):
++  with tempfile.TemporaryDirectory() as d:
++   mod=Path(d);(mod/'config').mkdir();(mod/'bin').mkdir()
++   fake=mod/'bin/rclone';fake.write_text('#!/bin/sh\nprintf "%s\\n" "--vfs-read-chunk-streams --s3-upload-concurrency --s3-chunk-size --s3-upload-cutoff --s3-no-head --s3-no-head-object --use-server-modtime --s3-directory-markers"\n');fake.chmod(0o700)
++   for typ in ['ftp','drive','s3']:
++    for mode in ['balanced','max']:
++     with self.subTest(type=typ,mode=mode):
++      (mod/'config/perf').write_text(mode);(mod/'config/rclone.conf').write_text(f'[remote]\ntype = {typ}\nendpoint = https://host.oraclecloud.com\n')
++      r=self.shell(f'MODDIR="{mod}"; RCLONE_CONF="$MODDIR/config/rclone.conf"; ACTIVE=remote; . "{ROOT}/module/scripts/perf_opts.sh"; compute_mount_opts; echo "$MOUNT_OPTS"')
++      self.assertEqual(r.returncode,0,r.stderr)
++      self.assertIn('--vfs-cache-mode writes' if typ=='ftp' and mode=='balanced' else '--vfs-cache-mode full',r.stdout)
++      self.assertIn('--buffer-size 16M' if mode=='max' else '--buffer-size 8M',r.stdout)
++      if typ=='s3':self.assertIn('--s3-directory-markers',r.stdout)
++ def test_signature_conflict_never_uninstalls(self):
++  with tempfile.TemporaryDirectory() as d:
++   p=Path(d);apk=p/'app.apk';apk.write_bytes(b'mock')
++   r=self.shell(f''' . "{ROOT}/module/scripts/install_app.sh"
++cmd() {{ echo INSTALL_FAILED_UPDATE_INCOMPATIBLE; }}
++pm() {{ echo INSTALL_FAILED_UPDATE_INCOMPATIBLE; }}
++install_app "{apk}" "{p}/log"''')
++   self.assertEqual(r.returncode,1)
++   log=(p/'log').read_text();self.assertIn('NO se desinstala',log);self.assertNotIn('por stdin',log)
++ def test_preload_second_instance_preserves_temporaries(self):
++  with tempfile.TemporaryDirectory() as d:
++   p=Path(d);(p/'scripts').mkdir();(p/'preload.lock').mkdir();(p/'.preload_list').write_text('keep')
++   common=(ROOT/'module/scripts/common.sh').read_text()+ '\nenter_global_namespace() { return 0; }\n'
++   (p/'scripts/common.sh').write_text(common)
++   (p/'scripts/preload.sh').write_text((ROOT/'module/scripts/preload.sh').read_text())
++   r=self.shell(f'sh "{p}/scripts/preload.sh"')
++   self.assertEqual(r.returncode,0,r.stderr);self.assertEqual((p/'.preload_list').read_text(),'keep')
++ def test_clear_cache_refuses_recovery_metadata(self):
++  with tempfile.TemporaryDirectory() as d:
++   p=Path(d);(p/'scripts').mkdir();(p/'cache/vfsMeta').mkdir(parents=True)
++   (p/'cache/vfsMeta/pending').write_text('must survive')
++   common=(ROOT/'module/scripts/common.sh').read_text()+'\nenter_global_namespace() { return 0; }\nis_mount_at() { return 1; }\n'
++   (p/'scripts/common.sh').write_text(common);(p/'scripts/clear_cache.sh').write_text((ROOT/'module/scripts/clear_cache.sh').read_text())
++   r=self.shell(f'sh "{p}/scripts/clear_cache.sh"')
++   self.assertEqual(r.returncode,1,r.stderr);self.assertTrue((p/'cache/vfsMeta/pending').exists())
++ def test_unmount_pending_and_empty_queue(self):
++  for pending in [0,1]:
++   with self.subTest(pending=pending), tempfile.TemporaryDirectory() as d:
++    p=Path(d);(p/'scripts').mkdir()
++    (p/'status.json').write_text('{"mounted":true,"remote":"remote","target":"/sdcard/FTP"}')
++    (p/'calls').write_text('')
++    common=(ROOT/'module/scripts/common.sh').read_text()+f"""
++enter_global_namespace() {{ return 0; }}
++is_mount_at() {{ [ ! -f "$MODDIR/detached" ] && [ "$1" = /data/local/tmp/rclone_ftp ]; }}
++setup_rc() {{ return 0; }}
++rc_call() {{ printf '%s\\n' '{{"uploadsQueued": {pending}, "uploadsInProgress": 0, "erroredFiles": 0, "inUse": 0}}' | sed 's/, /,\\n/g; s/}}/\\n}}/g'; }}
++sleep() {{ return 0; }}
++pgrep() {{ return 1; }}
++stat() {{ echo 123; }}
++umount() {{ echo "$1" >> "$MODDIR/calls"; [ "$1" = /data/local/tmp/rclone_ftp ] && touch "$MODDIR/detached"; return 0; }}
++"""
++    (p/'scripts/common.sh').write_text(common);(p/'scripts/env.sh').write_text('true\n')
++    (p/'scripts/unmount.sh').write_text((ROOT/'module/scripts/unmount.sh').read_text())
++    result=self.shell(f'sh "{p}/scripts/unmount.sh"')
++    self.assertEqual(result.returncode,1 if pending else 0,result.stdout+result.stderr)
++    if pending:self.assertEqual((p/'calls').read_text(),'')
++    else:self.assertIn('"mounted":false',(p/'status.json').read_text())
++ def test_no_force_or_broad_system_overlay(self):
++  unmount=(ROOT/'module/scripts/unmount.sh').read_text()
++  self.assertNotIn('umount -l',unmount);self.assertNotIn('pkill -f',unmount)
++  self.assertNotIn('mount -t overlay',(ROOT/'module/scripts/env.sh').read_text())
++  self.assertIn('rc_call vfs/stats',unmount)
++ def test_benchmark_uses_unique_directory(self):
++  s=(ROOT/'module/scripts/perf_test.sh').read_text()
++  self.assertIn('TDIR="$T/.rclone-bind-test-$$"',s)
++  self.assertIn('mkdir "$TDIR"',s);self.assertNotIn('mkdir -p "$TDIR"',s)
++ def test_app_boundary_guards(self):
++  s=(ROOT/'app/src/main/java/com/rclonebind/app/BindViewModel.kt').read_text()
++  self.assertIn('if (stopped.success) RootShell.mount() else stopped',s)
++  self.assertIn('finally {\n            busy = false',s)
++  s=(ROOT/'app/src/main/java/com/rclonebind/app/root/RootShell.kt').read_text()
++  self.assertIn('v.any { it.isISOControl() }',s)
++  self.assertIn('fun status(): Result = run("sh ${ModulePaths.SCRIPTS}/status.sh")',s)
++  self.assertIn('obscure -',s)
++if __name__=='__main__':unittest.main(verbosity=2)

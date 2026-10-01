@@ -1,0 +1,37 @@
+{
+  "base": "1.9.8",
+  "review": "1.9.9-review1",
+  "modified": [
+    "README.md",
+    "app/build.gradle.kts",
+    "app/src/main/AndroidManifest.xml",
+    "app/src/main/java/com/rclonebind/app/BindViewModel.kt",
+    "app/src/main/java/com/rclonebind/app/net/FtpScanner.kt",
+    "app/src/main/java/com/rclonebind/app/root/Conf.kt",
+    "app/src/main/java/com/rclonebind/app/root/RootShell.kt",
+    "app/src/main/java/com/rclonebind/app/ui/screens/HomeScreen.kt",
+    "module/customize.sh",
+    "module/module.prop",
+    "module/scripts/check_remote.sh",
+    "module/scripts/clear_cache.sh",
+    "module/scripts/drive_auth.sh",
+    "module/scripts/env.sh",
+    "module/scripts/install_app.sh",
+    "module/scripts/mount.sh",
+    "module/scripts/perf_test.sh",
+    "module/scripts/preload.sh",
+    "module/scripts/unmount.sh",
+    "module/scripts/watch.sh",
+    "module/service.sh"
+  ],
+  "added": [
+    "docs/AUDITORIA_ES.md",
+    "docs/RESULTADOS_PRUEBAS.txt",
+    "docs/VALIDACION_ANDROID_ES.md",
+    "module/scripts/common.sh",
+    "module/scripts/status.sh",
+    "tests/test_review.py"
+  ],
+  "tests": "15 test methods OK; no Android build/runtime",
+  "installable": false
+}

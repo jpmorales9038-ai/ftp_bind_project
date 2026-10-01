@@ -26,12 +26,23 @@ android {
         }
     }
 
+    val releaseStore = System.getenv("RCB_KEYSTORE")
+    if (!releaseStore.isNullOrBlank()) {
+        signingConfigs.create("privateRelease") {
+            storeFile = file(releaseStore)
+            storePassword = System.getenv("RCB_STORE_PASSWORD") ?: error("Falta RCB_STORE_PASSWORD")
+            keyAlias = System.getenv("RCB_KEY_ALIAS") ?: error("Falta RCB_KEY_ALIAS")
+            keyPassword = System.getenv("RCB_KEY_PASSWORD") ?: error("Falta RCB_KEY_PASSWORD")
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("privateRelease")
+    }
+
     defaultConfig {
         applicationId = "com.rclonebind.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 46
-        versionName = "1.9.8"
+        versionCode = 47
+        versionName = "1.9.9-review1"
 
         // Cliente OAuth de Google Drive que trae la app: el usuario solo da su
         // consentimiento, sin pegar credenciales. Se inyecta en el build desde

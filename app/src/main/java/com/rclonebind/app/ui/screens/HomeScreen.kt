@@ -200,15 +200,15 @@ fun HomeScreen(vm: BindViewModel, onOpenServers: () -> Unit) {
     if (showRamCacheConfirm) {
         AlertDialog(
             onDismissRequest = { showRamCacheConfirm = false },
-            title = { Text("¿Activar caché en RAM?") },
+            title = { Text("¿Activar caché en RAM de solo lectura?") },
             text = {
                 Text(
                     "La caché del perfil Máximo se guardará en la memoria RAM del " +
                         "teléfono en vez del almacenamiento interno: puede acelerar lecturas " +
                         "ya cacheadas, pero no la red. Consume RAM según se llena durante el " +
                         "tiempo que dure el montaje y su contenido se pierde al desmontar " +
-                        "o reiniciar. IMPORTANTE: las escrituras pendientes de subir pueden " +
-                        "perderse si se reinicia o se corta la alimentación. Si al " +
+                        "o reiniciar. Con RAM activa el montaje será de solo lectura para " +
+                        "no almacenar escrituras pendientes en memoria volátil. Si al " +
                         "montar no hay memoria suficiente, se usa el almacenamiento interno " +
                         "sin más aviso que una línea en Logs."
                 )
@@ -507,7 +507,7 @@ private fun PerfCard(
                 Column(Modifier.weight(1f)) {
                     Text("Caché en RAM", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Lecturas y escrituras a velocidad de RAM. Se pierde al desmontar o reiniciar.",
+                        "Solo lectura para proteger tus datos. La caché se pierde al desmontar o reiniciar.",
                         style = MaterialTheme.typography.bodySmall,
                         color = scheme.onSurfaceVariant
                     )

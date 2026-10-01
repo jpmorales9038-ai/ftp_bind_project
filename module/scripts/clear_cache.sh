@@ -8,6 +8,17 @@
 SELF="$(readlink -f "$0")"
 MODDIR=$(dirname "$(dirname "$SELF")")
 CACHE_DIR="$MODDIR/cache"
+. "$MODDIR/scripts/common.sh"
+enter_global_namespace "$@"
+acquire_operation_lock
+if is_mount_at /data/local/tmp/rclone_ftp || pgrep -f "$MODDIR/bin/rclone mount" >/dev/null 2>&1; then
+    echo "ERROR: rclone/FUSE sigue activo"; exit 1
+fi
+# vfsMeta may contain recovery information for unuploaded writes. Refuse
+# deletion rather than infer safety from a stale mounted:false flag.
+if [ -d "$CACHE_DIR/vfsMeta" ] && [ -n "$(find "$CACHE_DIR/vfsMeta" -type f -print -quit 2>/dev/null)" ]; then
+    echo "ERROR: hay metadatos VFS recuperables; monta y sincroniza antes de limpiar"; exit 1
+fi
 STATUS_FILE="$MODDIR/status.json"
 
 if grep -q '"mounted":true' "$STATUS_FILE" 2>/dev/null; then

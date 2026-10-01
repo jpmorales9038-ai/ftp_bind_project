@@ -1,3 +1,9 @@
+> **Revisión 1.9.9-review1 — fuentes, NO ZIP instalable.** Lee `docs/AUDITORIA_ES.md` y
+> `docs/VALIDACION_ANDROID_ES.md` antes de compilar o flashear. Esta revisión cambia
+> el desmontaje a no forzado y la caché RAM a solo lectura. Las instrucciones y
+> afirmaciones históricas de rendimiento siguientes describen 1.9.8 y pueden no
+> aplicar; el informe de revisión tiene prioridad para esta entrega.
+
 <p align="center">
   <img src="docs/banner.svg" alt="RClone FTP Bind: FTP, Google Drive y S3 como carpetas en Android. Oracle Cloud, Amazon S3, Cloudflare R2 y compatibles. Requiere KernelSU." width="100%">
 </p>

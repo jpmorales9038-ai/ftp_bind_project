@@ -24,7 +24,7 @@ private val FTP_PORTS = intArrayOf(21, 2121, 2221, 2222)
 
 private const val CONNECT_TIMEOUT_MS = 900
 private const val BANNER_TIMEOUT_MS = 1500
-private const val MAX_CONCURRENCY = 96
+private const val MAX_CONCURRENCY = 32
 
 /** Máximo de hosts a recorrer (una /22); redes más grandes se acotan alrededor de la IP local. */
 private const val MAX_HOSTS = 1022
@@ -69,7 +69,9 @@ private fun findLocalNet(context: Context): LocalNet? {
  */
 private fun localNetFromInterfaces(): LocalNet? = try {
     NetworkInterface.getNetworkInterfaces()?.asSequence()
-        ?.filter { it.isUp && !it.isLoopback }
+        ?.filter { it.isUp && !it.isLoopback &&
+            (it.name.startsWith("wlan") || it.name.startsWith("ap") ||
+                it.name.startsWith("swlan") || it.name.startsWith("eth")) }
         ?.flatMap { ni ->
             ni.interfaceAddresses.asSequence()
                 .filter { it.address is Inet4Address && !it.address.isLoopbackAddress }
@@ -100,7 +102,8 @@ private fun intToIp(v: Int): String =
 private fun hostsOf(net: LocalNet): List<String> {
     val self = ipToInt(net.address.address)
     // Prefijo entre /22 y /30: nunca más de 1022 hosts, ni una subred absurda.
-    val prefix = net.prefix.coerceIn(22, 30)
+    if (net.prefix !in 0..30) return emptyList()
+    val prefix = net.prefix.coerceAtLeast(22)
     val mask = -1 shl (32 - prefix)
     val network = self and mask
     val broadcast = network or mask.inv()
@@ -122,7 +125,18 @@ private fun probeFtp(ip: String, port: Int, network: Network?): FoundFtpServer? 
         socket.connect(InetSocketAddress(ip, port), CONNECT_TIMEOUT_MS)
         val banner = try {
             socket.soTimeout = BANNER_TIMEOUT_MS
-            socket.getInputStream().bufferedReader().readLine()?.trim()
+            // A hostile/broken banner must not allocate an unbounded line.
+            val input = socket.getInputStream()
+            val bytes = java.io.ByteArrayOutputStream(256)
+            val deadline = System.nanoTime() + BANNER_TIMEOUT_MS * 1_000_000L
+            while (bytes.size() < 1024 && System.nanoTime() < deadline) {
+                val remainingMs = ((deadline - System.nanoTime()) / 1_000_000L).coerceAtLeast(1)
+                socket.soTimeout = remainingMs.toInt()
+                val c = input.read()
+                if (c < 0 || c == 10) break
+                bytes.write(c)
+            }
+            bytes.toString("UTF-8").trim().ifEmpty { null }
         } catch (e: Exception) {
             null
         }
@@ -159,7 +173,11 @@ suspend fun scanForFtpServers(
                     FTP_PORTS.map { port ->
                         async {
                             val found = probeFtp(ip, port, net.network)
-                            onProgress(checked.incrementAndGet(), total)
+                            val done = checked.incrementAndGet()
+                            // Rate-limit Compose state updates on large subnets.
+                            synchronized(checked) {
+                                if (done % 16 == 0 || done == total) onProgress(checked.get(), total)
+                            }
                             found
                         }
                     }

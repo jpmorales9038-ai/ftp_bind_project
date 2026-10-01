@@ -11,9 +11,9 @@ MODDIR=$(dirname "$(dirname "$SELF")")
 # "dice que monta pero no aparecen los archivos". Forzamos re-ejecutar
 # este script ya adentro del namespace de PID 1 para que el mount se
 # propague a todo el sistema.
-if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
-    exec nsenter -t 1 -m -- sh "$SELF" "$@"
-fi
+. "$MODDIR/scripts/common.sh"
+enter_global_namespace "$@"
+acquire_operation_lock
 
 RCLONE_BIN="$MODDIR/bin/rclone"
 RCLONE_CONF="$MODDIR/config/rclone.conf"
@@ -27,6 +27,20 @@ RCLONE_MOUNTPOINT="/data/local/tmp/rclone_ftp"
 # la app (config/target_path); sin ese archivo se usa la de siempre.
 TARGET_PATH="$(cat "$MODDIR/config/target_path" 2>/dev/null)"
 [ -z "$TARGET_PATH" ] && TARGET_PATH="/sdcard/FTP"
+valid_target "$TARGET_PATH" || { echo "ERROR: destino fuera del almacenamiento o caracteres no admitidos"; exit 1; }
+if is_mount_at /data/local/tmp/rclone_ftp; then
+    echo "ERROR: ya hay un FUSE activo; desmonta antes de volver a montar"
+    exit 1
+fi
+# Bound log growth between mounts without truncating an active writer.
+LOG_BYTES=$(stat -c %s "$LOG_FILE" 2>/dev/null)
+case "$LOG_BYTES" in ''|*[!0-9]*) LOG_BYTES=0 ;; esac
+if [ "$LOG_BYTES" -gt 4194304 ]; then
+    tail -n 2000 "$LOG_FILE" > "$LOG_FILE.trim" && mv "$LOG_FILE.trim" "$LOG_FILE"
+fi
+[ -x "$RCLONE_BIN" ] && [ -x "$MODDIR/bin/fusermount3" ] || { echo "ERROR: faltan rclone/fusermount3 ejecutables"; exit 1; }
+[ -c /dev/fuse ] || { echo "ERROR: /dev/fuse no disponible"; exit 1; }
+setup_rc || { echo "ERROR: no se pudo configurar RC"; exit 1; }
 
 # HOME, PATH (fusermount3) y certificados TLS para rclone: ver env.sh.
 . "$MODDIR/scripts/env.sh"
@@ -40,6 +54,7 @@ fi
 # "remote", el nombre que usaban las versiones con un solo servidor.
 ACTIVE="$(cat "$MODDIR/config/active" 2>/dev/null)"
 [ -z "$ACTIVE" ] && ACTIVE="remote"
+case "$ACTIVE" in ''|-*|*[!a-zA-Z0-9_.+@\ -]*) echo "ERROR: nombre remoto invalido"; exit 1 ;; esac
 . "$MODDIR/scripts/perf_opts.sh"
 if [ -z "$(remote_type "$ACTIVE")" ]; then
     echo "$(date): No existe el servidor '$ACTIVE' en rclone.conf" >> "$LOG_FILE"
@@ -59,6 +74,12 @@ compute_mount_opts
 # RAM_CACHE_DIR (no el archivo de config, que solo expresa lo que se pidió) —
 # así perf_test.sh puede saberlo con una simple lectura de /proc/mounts.
 RAM_CACHE_DIR="$MODDIR/cache_ram"
+if [ "$(cat "$MODDIR/config/ram_cache" 2>/dev/null)" = 1 ] &&
+   [ -d "$MODDIR/cache/vfsMeta" ] &&
+   [ -n "$(find "$MODDIR/cache/vfsMeta" -type f -print -quit 2>/dev/null)" ]; then
+    echo "ERROR: caché VFS en disco recuperable; usa disco y sincroniza antes de activar RAM"
+    exit 1
+fi
 if [ "$PERF" = max ] && [ "$(cat "$MODDIR/config/ram_cache" 2>/dev/null)" = "1" ]; then
     AVAIL_KB="$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null)"
     case "$AVAIL_KB" in ''|*[!0-9]*) AVAIL_KB=0 ;; esac
@@ -78,6 +99,8 @@ if [ "$PERF" = max ] && [ "$(cat "$MODDIR/config/ram_cache" 2>/dev/null)" = "1" 
         fi
         if grep -q " $RAM_CACHE_DIR tmpfs" /proc/mounts; then
             CACHE_DIR="$RAM_CACHE_DIR"
+            # Volatile VFS must not hold the only copy of pending writes.
+            MOUNT_OPTS="$MOUNT_OPTS --read-only"
             echo "$(date): Caché en RAM activa (${CACHE_GB:-10}G, ${AVAIL_MB}M libres)" >> "$LOG_FILE"
         else
             echo "$(date): No se pudo montar el tmpfs de caché en RAM, se usa disco" >> "$LOG_FILE"
@@ -91,8 +114,8 @@ mkdir -p "$CACHE_DIR"
 mkdir -p "$RCLONE_MOUNTPOINT"
 # Estado actual: el montaje FUSE de rclone y el bind sobre /sdcard/FTP son
 # dos cosas distintas. Si un intento anterior dejó el FUSE pero no el bind,
-# solo hay que completar el bind.
-is_fuse_mounted() { grep -q " $RCLONE_MOUNTPOINT " /proc/mounts; }
+# se exige desmontar primero para no reutilizar opciones/remotos antiguos.
+is_fuse_mounted() { is_mount_at "$RCLONE_MOUNTPOINT"; }
 
 # OJO: /proc/mounts muestra la ruta REAL ya resuelta (/sdcard es un symlink
 # a /storage/emulated/0 o similar), nunca "/sdcard/FTP". Buscar ese texto
@@ -108,7 +131,9 @@ is_bound_at() {
 
 try_bind() {
     # $1 = ruta destino a probar
-    mkdir -p "$1" 2>>"$LOG_FILE"
+    mkdir -p "$1" 2>>"$LOG_FILE" || return 1
+    _real=$(readlink -f "$1")
+    valid_target "$_real" || { echo "ERROR: destino resuelto no seguro: $_real" >&2; return 1; }
     is_bound_at "$1" && return 0
     err="$(mount --bind "$RCLONE_MOUNTPOINT" "$1" 2>&1)" || \
         echo "$(date): mount --bind hacia $1 falló: $err" >> "$LOG_FILE"
@@ -139,7 +164,7 @@ do_bind() {
     fi
     # Se guarda la ruta REAL usada: unmount.sh debe apuntar a esta aunque
     # el usuario cambie la ruta desde la app mientras sigue montado.
-    echo "{\"mounted\":true,\"remote\":\"$ACTIVE\",\"target\":\"$USED\"}" > "$STATUS_FILE"
+    printf '{"mounted":true,"remote":"%s","target":"%s"}\n' "$ACTIVE" "$USED" > "$STATUS_FILE.tmp" && mv "$STATUS_FILE.tmp" "$STATUS_FILE"
     echo "$(date): '$ACTIVE' montado correctamente en $USED" >> "$LOG_FILE"
     # Vigila el bind y lo rehace si algo (p. ej. el launcher del juego) lo
     # quita. Stdio a /dev/null para no dejar colgada la shell root de la app.
@@ -158,7 +183,7 @@ do_bind() {
     # precargar en vez de los que había (visto en mount.log: dos líneas
     # "Precarga: ..." con un total distinto en el mismo segundo). Se espera
     # hasta 5s a que el propio trap de salida de preload.sh suelte el
-    # candado antes de forzar el borrado y lanzar la nueva; todo en segundo
+    # candado antes de lanzar la nueva; si sigue ocupado, no se borra; todo en segundo
     # plano para no demorar la confirmación de montaje.
     pkill -f "$MODDIR/scripts/preload.sh" 2>/dev/null
     (
@@ -167,7 +192,7 @@ do_bind() {
             sleep 1
             i=$((i + 1))
         done
-        rm -rf "$MODDIR/preload.lock"
+        [ -d "$MODDIR/preload.lock" ] && exit 0
         sh "$MODDIR/scripts/preload.sh" </dev/null >/dev/null 2>&1
     ) &
 
@@ -189,12 +214,17 @@ echo "$(date): montando '$ACTIVE:$REMOTE_ROOT' (tipo $(remote_type "$ACTIVE"))" 
     --config "$RCLONE_CONF" \
     --cache-dir "$CACHE_DIR" \
     --allow-other \
+    --rc \
     $MOUNT_OPTS \
     --daemon \
     --log-file "$LOG_FILE" \
     --log-level INFO
 
-sleep 2
+i=0
+while ! is_fuse_mounted && [ "$i" -lt 10 ]; do
+    sleep 1
+    i=$((i + 1))
+done
 
 if is_fuse_mounted; then
     do_bind
