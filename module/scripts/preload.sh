@@ -49,14 +49,11 @@ FORCE="$1"
 if [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
     exec nsenter -t 1 -m -- sh "$SELF" "$@"
 fi
-<<<<<<< Updated upstream
-=======
 
 # Fuera del cgroup de la app (el botón "Precargar ahora" la lanza desde su
 # shell root): si no, Android la congela al pasar la app a segundo plano.
 . "$MODDIR/scripts/proc_detach.sh"
 detach_from_app
->>>>>>> Stashed changes
 
 LOG_FILE="$MODDIR/mount.log"
 STATUS_FILE="$MODDIR/status.json"
@@ -68,18 +65,9 @@ PRELOAD_STATUS="$MODDIR/preload_status.json"
 rm -f "$MODDIR"/.preload_list "$MODDIR"/.preload_selected "$MODDIR"/.preload_part_* \
       "$MODDIR"/.preload_result_* "$MODDIR"/.preload_progress_* "$MODDIR"/.preload_all_done 2>/dev/null
 
-<<<<<<< Updated upstream
-# Tamaño de un archivo en MB enteros. Se calcula con awk y no con $(( )): el
-# mksh de Android hace la aritmética en 32 bits con signo, y un archivo de más
-# de 2 GiB daba MB negativos (p. ej. -1581 para uno de 2515 MB).
-file_mb() {
-    stat -c %s "$1" 2>/dev/null | awk '{printf "%d", $1 / 1048576}'
-}
-=======
 # Nota: los tamaños se suman siempre con awk y no con $(( )): el mksh de
 # Android hace la aritmética en 32 bits con signo, y un archivo de más de
 # 2 GiB daba MB negativos (p. ej. -1581 para uno de 2515 MB).
->>>>>>> Stashed changes
 
 # Escribe preload_status.json de forma atómica (tmp + mv) para que la app,
 # que lo lee mientras corre esta precarga, nunca vea un JSON a medio
@@ -163,11 +151,6 @@ run_with_timeout() {
     wait "$wpid" 2>/dev/null
     return "$rc"
 }
-<<<<<<< Updated upstream
-
-FILELIST="$MODDIR/.preload_list"
-find "$T" -type f -not -path '*/.rclone-bind-test/*' 2>/dev/null | sort > "$FILELIST"
-=======
 TAB="$(printf '\t')"
 FILELIST="$MODDIR/.preload_list"
 
@@ -192,7 +175,6 @@ if [ ! -s "$FILELIST.raw" ]; then
 fi
 sort -n "$FILELIST.raw" > "$FILELIST" 2>/dev/null || mv -f "$FILELIST.raw" "$FILELIST"
 rm -f "$FILELIST.raw"
->>>>>>> Stashed changes
 TOTAL="$(wc -l < "$FILELIST" 2>/dev/null | tr -d ' ')"
 [ -z "$TOTAL" ] && TOTAL=0
 
@@ -231,19 +213,10 @@ if [ "$MARKER_OK" = 1 ]; then
     exit 0
 fi
 
-<<<<<<< Updated upstream
-# Tope de archivos por corrida (config/preload_max_files; por defecto 20000,
-# antes fijo en 2000). Un mod grande de GTA o un juego Unity/Unreal con
-# miles de texturas y audios sueltos supera 2000 archivos sin acercarse al
-# presupuesto en MB, así que ese tope viejo dejaba assets sin precargar sin
-# avisar. Sigue habiendo un tope (y no "sin límite") para no recorrer para
-# siempre un remoto ajeno al juego con millones de archivos.
-=======
 # Tope de archivos por corrida (config/preload_max_files; por defecto 20000).
 # Hay remotos con miles de archivos sueltos que no se acercan al presupuesto
 # en MB; sigue habiendo un tope (y no "sin límite") para no recorrer para
 # siempre un remoto enorme con contenido que nadie va a abrir.
->>>>>>> Stashed changes
 MAX_FILES="$(cat "$MODDIR/config/preload_max_files" 2>/dev/null)"
 case "$MAX_FILES" in ''|*[!0-9]*|0) MAX_FILES=20000 ;; esac
 [ "$MAX_FILES" -gt 200000 ] && MAX_FILES=200000

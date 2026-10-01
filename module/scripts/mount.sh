@@ -210,9 +210,6 @@ echo "$(date): montando '$ACTIVE:$REMOTE_ROOT' (tipo $(remote_type "$ACTIVE"))" 
     --log-file "$LOG_FILE" \
     --log-level INFO
 
-<<<<<<< Updated upstream
-sleep 2
-=======
 # Con --daemon, rclone ya espera a que el montaje esté listo antes de
 # volver; el "sleep 2" fijo de antes solo agregaba latencia a cada montaje.
 # Se sondea hasta 10 s por si el binario es viejo o el FUSE tarda en aparecer.
@@ -221,7 +218,6 @@ while ! is_fuse_mounted && [ "$i" -lt 20 ]; do
     sleep 0.5 2>/dev/null || sleep 1
     i=$((i + 1))
 done
->>>>>>> Stashed changes
 
 if is_fuse_mounted; then
     do_bind
