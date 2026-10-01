@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,13 +32,18 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
+import android.content.res.Configuration
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -77,9 +83,20 @@ fun rememberIsDualPane(): Boolean = LocalConfiguration.current.screenWidthDp >= 
 val DualPaneContentWidth = 1080.dp
 
 /**
+ * Alto del difuminado bajo el encabezado. Es el espejo del que hay sobre la
+ * barra de gestos (MainActivity), pero más corto: el encabezado ya ocupa su
+ * propio espacio y el de abajo es más alto porque además cubre la píldora.
+ * En apaisado se reduce igual que el inferior, porque la pantalla tiene
+ * mucha menos altura.
+ */
+private val TopFadeHeight = 32.dp
+private val TopFadeHeightLandscape = 20.dp
+
+/**
  * Pantalla con encabezado fijo grande (título + acciones a la derecha) y
- * contenido desplazable debajo. El contenido se corta en seco contra el
- * encabezado.
+ * contenido desplazable debajo. Al desplazarse, el contenido se funde con el
+ * fondo contra el encabezado con el mismo degradado que la barra de gestos
+ * inferior (ver [TopFade]).
  *
  * El ancho del contenido se centra y tiene un máximo para que en pantallas
  * angostas (celular en vertical) no cambie nada, pero en pantallas anchas
@@ -120,9 +137,45 @@ fun ScreenContainer(
             if (title != null) {
                 ScreenHeader(title, actions, LocalContentEndInset.current, pullState, refreshing)
             }
-            ScreenBody(Modifier.weight(1f).fillMaxWidth(), scroll, scrollState, content)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                ScreenBody(Modifier.fillMaxSize(), scroll, scrollState, content)
+                // Solo si la pantalla desplaza su contenido: Logs usa una
+                // tarjeta fija con scroll propio y un degradado la taparía.
+                if (scroll) TopFade(scrollState, Modifier.align(Alignment.TopCenter))
+            }
         }
     }
+}
+
+/**
+ * Difuminado bajo el encabezado: mismo degradado que el de la barra de gestos
+ * (mismos tramos y opacidades) pero espejado, de opaco arriba a transparente
+ * abajo. Su intensidad crece con el desplazamiento (0 en reposo, completa tras
+ * recorrer su propio alto), así en reposo no vela la primera tarjeta y solo
+ * actúa cuando el contenido de verdad pasa por debajo del encabezado. El
+ * alpha se lee dentro de graphicsLayer: se anima sin recomponer. No intercepta
+ * toques.
+ */
+@Composable
+private fun TopFade(scrollState: ScrollState, modifier: Modifier = Modifier) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val height = if (isLandscape) TopFadeHeightLandscape else TopFadeHeight
+    val heightPx = with(LocalDensity.current) { height.toPx() }
+    val fade = MaterialTheme.colorScheme.background
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(height)
+            .graphicsLayer { alpha = (scrollState.value / heightPx).coerceIn(0f, 1f) }
+            .background(
+                Brush.verticalGradient(
+                    0f to fade.copy(alpha = 0.96f),
+                    0.3f to fade.copy(alpha = 0.7f),
+                    0.65f to fade.copy(alpha = 0.25f),
+                    1f to Color.Transparent
+                )
+            )
+    )
 }
 
 @Composable
