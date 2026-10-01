@@ -38,12 +38,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -83,20 +84,20 @@ fun rememberIsDualPane(): Boolean = LocalConfiguration.current.screenWidthDp >= 
 val DualPaneContentWidth = 1080.dp
 
 /**
- * Alto del difuminado bajo el encabezado. Es el espejo del que hay sobre la
- * barra de gestos (MainActivity), pero más corto: el encabezado ya ocupa su
- * propio espacio y el de abajo es más alto porque además cubre la píldora.
- * En apaisado se reduce igual que el inferior, porque la pantalla tiene
- * mucha menos altura.
+ * Cuánto se prolonga el difuminado por debajo de la barra del título. El
+ * difuminado completo abarca la barra entera (título y acciones) MÁS esta
+ * franja, así que en vertical mide ~96dp en total, parecido a los 104dp del
+ * de la barra de gestos. En apaisado se reduce igual que el inferior, porque
+ * la pantalla tiene mucha menos altura.
  */
-private val TopFadeHeight = 32.dp
-private val TopFadeHeightLandscape = 20.dp
+private val TopFadeExtra = 32.dp
+private val TopFadeExtraLandscape = 16.dp
 
 /**
  * Pantalla con encabezado fijo grande (título + acciones a la derecha) y
- * contenido desplazable debajo. Al desplazarse, el contenido se funde con el
- * fondo contra el encabezado con el mismo degradado que la barra de gestos
- * inferior (ver [TopFade]).
+ * contenido desplazable debajo. El contenido pasa POR DEBAJO de toda la barra
+ * del título y se funde con el fondo con el mismo degradado que la barra de
+ * gestos inferior, espejado (ver [TopFade]).
  *
  * El ancho del contenido se centra y tiene un máximo para que en pantallas
  * angostas (celular en vertical) no cambie nada, pero en pantallas anchas
@@ -123,8 +124,17 @@ fun ScreenContainer(
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     val resolvedMaxWidth = maxContentWidth ?: adaptiveMaxWidth(screenWidthDp)
     val pullState = if (onRefresh != null) rememberPullToRefreshState() else null
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val fadeExtra = if (isLandscape) TopFadeExtraLandscape else TopFadeExtra
+    val endInset = LocalContentEndInset.current
+
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(
+        // Se mide primero la barra del título para saber su alto real y
+        // dárselo al contenido como relleno superior: así el contenido
+        // arranca justo debajo de ella en reposo, pero al desplazarse sube
+        // por detrás (el cuerpo ocupa todo el alto) y el difuminado lo cubre.
+        // Orden de dibujo: cuerpo, difuminado, título/acciones (encima).
+        SubcomposeLayout(
             Modifier
                 .widthIn(max = resolvedMaxWidth)
                 .fillMaxSize()
@@ -133,40 +143,60 @@ fun ScreenContainer(
                         base.pullToRefresh(isRefreshing = refreshing, state = pullState, onRefresh = onRefresh)
                     } else base
                 }
-        ) {
-            if (title != null) {
-                ScreenHeader(title, actions, LocalContentEndInset.current, pullState, refreshing)
-            }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                ScreenBody(Modifier.fillMaxSize(), scroll, scrollState, content)
-                // Solo si la pantalla desplaza su contenido: Logs usa una
-                // tarjeta fija con scroll propio y un degradado la taparía.
-                if (scroll) TopFade(scrollState, Modifier.align(Alignment.TopCenter))
+        ) { c ->
+            val w = c.maxWidth
+            val h = c.maxHeight
+            val loose = Constraints(minWidth = w, maxWidth = w, minHeight = 0, maxHeight = h)
+
+            val indicator = if (title != null && pullState != null) {
+                subcompose("indicator") { PullStretchIndicator(pullState, refreshing) }.map { it.measure(loose) }
+            } else emptyList()
+            val indH = indicator.sumOf { it.height }
+
+            val titleBar = if (title != null) {
+                subcompose("title") { ScreenHeader(title, actions, endInset) }.map { it.measure(loose) }
+            } else emptyList()
+            val titleH = titleBar.sumOf { it.height }
+
+            val body = subcompose("body") {
+                ScreenBody(Modifier.fillMaxSize(), scroll, scrollState, titleH.toDp(), content)
+            }.map { it.measure(Constraints.fixed(w, (h - indH).coerceAtLeast(0))) }
+
+            // Solo si la pantalla desplaza su contenido: Logs usa una tarjeta
+            // fija con scroll propio y un degradado la taparía.
+            val fadeExtraPx = fadeExtra.roundToPx()
+            val fade = if (scroll && title != null) {
+                subcompose("fade") { TopFade(scrollState, fadeExtraPx.toFloat()) }
+                    .map { it.measure(Constraints.fixed(w, titleH + fadeExtraPx)) }
+            } else emptyList()
+
+            layout(w, h) {
+                body.forEach { it.place(0, indH) }
+                fade.forEach { it.place(0, indH) }
+                titleBar.forEach { it.place(0, indH) }
+                indicator.forEach { it.place(0, 0) }
             }
         }
     }
 }
 
 /**
- * Difuminado bajo el encabezado: mismo degradado que el de la barra de gestos
- * (mismos tramos y opacidades) pero espejado, de opaco arriba a transparente
- * abajo. Su intensidad crece con el desplazamiento (0 en reposo, completa tras
- * recorrer su propio alto), así en reposo no vela la primera tarjeta y solo
- * actúa cuando el contenido de verdad pasa por debajo del encabezado. El
- * alpha se lee dentro de graphicsLayer: se anima sin recomponer. No intercepta
- * toques.
+ * Difuminado de la barra del título: mismo degradado que el de la barra de
+ * gestos (mismos tramos y opacidades) pero espejado, de opaco arriba a
+ * transparente abajo. Cubre TODA la barra (título y acciones) más una franja
+ * extra por debajo, así lo que pasa por detrás de las palabras también se
+ * funde. Su intensidad crece con el desplazamiento (0 en reposo, completa
+ * tras recorrer [rampPx]): en reposo no vela la primera tarjeta y solo actúa
+ * cuando el contenido de verdad sube por debajo. El alpha se lee dentro de
+ * graphicsLayer: se anima sin recomponer. No intercepta toques.
  */
 @Composable
-private fun TopFade(scrollState: ScrollState, modifier: Modifier = Modifier) {
-    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val height = if (isLandscape) TopFadeHeightLandscape else TopFadeHeight
-    val heightPx = with(LocalDensity.current) { height.toPx() }
+private fun TopFade(scrollState: ScrollState, rampPx: Float) {
     val fade = MaterialTheme.colorScheme.background
     Box(
-        modifier
-            .fillMaxWidth()
-            .height(height)
-            .graphicsLayer { alpha = (scrollState.value / heightPx).coerceIn(0f, 1f) }
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer { alpha = (scrollState.value / rampPx).coerceIn(0f, 1f) }
             .background(
                 Brush.verticalGradient(
                     0f to fade.copy(alpha = 0.96f),
@@ -183,6 +213,7 @@ private fun ScreenBody(
     modifier: Modifier,
     scroll: Boolean,
     scrollState: ScrollState,
+    topInset: Dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(
@@ -191,7 +222,7 @@ private fun ScreenBody(
             .then(if (scroll) Modifier.verticalScroll(scrollState) else Modifier)
             .padding(
                 start = 16.dp,
-                top = 8.dp,
+                top = topInset + 8.dp,
                 end = 16.dp + LocalContentEndInset.current,
                 bottom = 16.dp + LocalContentBottomInset.current
             ),
@@ -216,29 +247,22 @@ private fun adaptiveMaxWidth(screenWidthDp: Int): Dp {
 private fun ScreenHeader(
     title: String,
     actions: @Composable RowScope.() -> Unit,
-    endInset: Dp,
-    pullState: PullToRefreshState?,
-    refreshing: Boolean
+    endInset: Dp
 ) {
-    Column {
-        if (pullState != null) {
-            PullStretchIndicator(pullState, refreshing)
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 24.dp, end = 12.dp + endInset, top = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.displaySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            actions()
-        }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 12.dp + endInset, top = 12.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.displaySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        actions()
     }
 }
 
