@@ -75,7 +75,8 @@ rclone_at_least() {
 #   s3_fewer_req      1 = menos peticiones, 0 = no
 #   s3_dir_cache_min  minutos que se cachea cada listado (1-1440)
 
-# Oracle Cloud si el endpoint es de *.oraclecloud.com; si no, "other".
+# Oracle Cloud si el endpoint es de *.oraclecloud.com, Cloudflare R2 si es de
+# *.r2.cloudflarestorage.com; si no, "other".
 s3_provider() {
     _ep="$(remote_key "$ACTIVE" endpoint)"
     _ep="${_ep#*://}"
@@ -83,6 +84,7 @@ s3_provider() {
     _ep="${_ep%%:*}"
     case "$_ep" in
         *.oraclecloud.com) echo oracle ;;
+        *.r2.cloudflarestorage.com) echo cloudflare ;;
         *) echo other ;;
     esac
 }
@@ -112,7 +114,8 @@ s3_has_flag() {
 #  - Máximo: caché grande, lectura anticipada, varios trozos del mismo archivo
 #    en paralelo y subida multiparte en paralelo.
 #  - Menos peticiones (por defecto en Oracle, que factura y limita por número
-#    de peticiones según el plan): --use-server-modtime evita un HEAD por
+#    de peticiones según el plan, y en Cloudflare R2, que cobra por operación
+#    pasado su cupo gratis): --use-server-modtime evita un HEAD por
 #    archivo para leer su fecha y el SetModTime (copia en el servidor) tras
 #    cada subida, a costa de que la fecha de modificación sea la de subida;
 #    --s3-no-head y --s3-no-head-object quitan los HEAD antes/después de
@@ -126,12 +129,13 @@ s3_mount_opts() {
     _fewer="$(cat "$_cfg/s3_fewer_req" 2>/dev/null)"
     case "$_fewer" in
         0|1) ;;
-        *) if [ "$_prov" = oracle ]; then _fewer=1; else _fewer=0; fi ;;
+        *) case "$_prov" in oracle|cloudflare) _fewer=1 ;; *) _fewer=0 ;; esac ;;
     esac
 
-    if [ "$_prov" = oracle ]; then _dcd=30
-    elif [ "$PERF" = max ]; then _dcd=10
-    else _dcd=5; fi
+    case "$_prov" in
+        oracle|cloudflare) _dcd=30 ;;
+        *) if [ "$PERF" = max ]; then _dcd=10; else _dcd=5; fi ;;
+    esac
     _dc="$(num_in_range "$(cat "$_cfg/s3_dir_cache_min" 2>/dev/null)" 1 1440 "$_dcd")"
 
     s3_flags_load
@@ -139,7 +143,10 @@ s3_mount_opts() {
 
     if [ "$PERF" = max ]; then
         _st="$(num_in_range "$(cat "$_cfg/s3_streams" 2>/dev/null)" 1 12 6)"
-        _cc="$(num_in_range "$(cat "$_cfg/s3_upload_conc" 2>/dev/null)" 1 16 6)"
+        # R2 falla con la firma en archivos grandes si suben muchas partes a la
+        # vez (visto en rclone con 4 o más): arranca en 3. Los demás, en 6.
+        if [ "$_prov" = cloudflare ]; then _ccd=3; else _ccd=6; fi
+        _cc="$(num_in_range "$(cat "$_cfg/s3_upload_conc" 2>/dev/null)" 1 16 "$_ccd")"
         _ck="$(cat "$_cfg/s3_chunk_mb" 2>/dev/null)"
         case "$_ck" in 8|16|32|64) ;; *) _ck=16 ;; esac
         _tr=4

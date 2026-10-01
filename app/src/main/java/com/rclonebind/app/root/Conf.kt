@@ -89,6 +89,7 @@ data class RemoteProfile(
 enum class S3Provider(val label: String, private val hostSuffixes: List<String>) {
     ORACLE("Oracle Cloud", listOf(".oraclecloud.com")),
     AWS("Amazon S3", listOf(".amazonaws.com", ".amazonaws.com.cn")),
+    CLOUDFLARE("Cloudflare R2", listOf(".r2.cloudflarestorage.com")),
     /** Cualquier otro servicio compatible con S3. */
     OTHER("Otro proveedor", emptyList());
 
@@ -154,14 +155,22 @@ object S3Perf {
     /** Tope de RAM de subida: el script baja las partes simultáneas para no pasarlo. */
     const val UPLOAD_RAM_CAP_MB = 768
 
-    /** Oracle factura y limita por peticiones según el plan: recorta por defecto. */
-    fun defaultFewerRequests(provider: S3Provider): Boolean = provider == S3Provider.ORACLE
+    /** Oracle y Cloudflare R2 facturan por número de peticiones (R2 tras un cupo gratis): recortan por defecto. */
+    fun defaultFewerRequests(provider: S3Provider): Boolean =
+        provider == S3Provider.ORACLE || provider == S3Provider.CLOUDFLARE
 
     fun defaultDirCacheMin(provider: S3Provider, mode: PerfMode): Int = when {
-        provider == S3Provider.ORACLE -> 30
+        provider == S3Provider.ORACLE || provider == S3Provider.CLOUDFLARE -> 30
         mode == PerfMode.MAX -> 10
         else -> 5
     }
+
+    /**
+     * R2 da errores de firma en archivos grandes con mucha subida multiparte
+     * simultánea (reportado en rclone con 4 o más partes), así que arranca en 3.
+     */
+    fun defaultUploadConcurrency(provider: S3Provider): Int =
+        if (provider == S3Provider.CLOUDFLARE) 3 else UPLOAD_CONC_DEFAULT
 
     /** Partes simultáneas que realmente se usan: las pedidas, bajadas hasta entrar en el tope de RAM. */
     fun effectiveUploadConcurrency(requested: Int, chunkMb: Int): Int {
@@ -331,6 +340,45 @@ fun awsEndpoint(region: String): String {
 fun validateAwsRegion(region: String): String? = when {
     region.isEmpty() -> "Escribe la región del bucket"
     !AWS_REGION.matches(region) -> "Formato de región, por ejemplo us-east-1"
+    else -> null
+}
+
+// ---- Cloudflare R2 ----
+
+// Account ID: 32 caracteres hexadecimales (panel de Cloudflare > R2 > Resumen).
+private val CF_ACCOUNT_ID = Regex("^[0-9a-fA-F]{32}$")
+
+// Host de la API S3 de R2. La jurisdicción (eu, fedramp) va entre el ID y "r2":
+//   <id>.r2.cloudflarestorage.com, <id>.eu.r2.cloudflarestorage.com...
+private val CF_HOST =
+    Regex("^([0-9a-f]{32})(\\.(?:eu|fedramp))?\\.r2\\.cloudflarestorage\\.com$")
+
+/** Solo el host de lo pegado: sin esquema, ruta, consulta ni puerto, en minúsculas. */
+private fun hostOnly(raw: String): String =
+    raw.trim().lowercase().substringAfter("://").substringBefore("/").substringBefore("?").substringBefore(":")
+
+/**
+ * Endpoint de R2 a partir de lo escrito en el campo: el Account ID (se arma
+ * https://<id>.r2.cloudflarestorage.com) o el endpoint/host completo, que es la
+ * forma de conservar una jurisdicción (UE, FedRAMP). Null si no es ninguna.
+ */
+fun cloudflareEndpoint(input: String): String? {
+    val t = input.trim()
+    if (CF_ACCOUNT_ID.matches(t)) return "https://${t.lowercase()}.r2.cloudflarestorage.com"
+    val host = hostOnly(t)
+    return if (CF_HOST.matches(host)) "https://$host" else null
+}
+
+/** Lo que muestra el campo al editar: el Account ID, o el host entero si lleva jurisdicción. */
+fun cloudflareFieldValue(endpoint: String): String? {
+    val host = hostOnly(endpoint)
+    val m = CF_HOST.matchEntire(host) ?: return null
+    return if (m.groupValues[2].isEmpty()) m.groupValues[1] else host
+}
+
+fun validateCloudflareAccount(input: String): String? = when {
+    input.isBlank() -> "Escribe el Account ID"
+    cloudflareEndpoint(input) == null -> "Debe ser el Account ID (32 caracteres) o el endpoint de R2"
     else -> null
 }
 

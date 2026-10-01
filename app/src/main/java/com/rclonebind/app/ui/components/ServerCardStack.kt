@@ -114,6 +114,7 @@ private fun StackCard(
     val isDrive = profile.type == RemoteType.DRIVE
     val isOracle = profile.s3Provider == S3Provider.ORACLE
     val isAws = profile.s3Provider == S3Provider.AWS
+    val isCloudflare = profile.s3Provider == S3Provider.CLOUDFLARE
     val container = when {
         // Perfiles de Drive: color de marca propio y fijo, no la paleta
         // rotativa por posición que usan los demás perfiles.
@@ -127,6 +128,10 @@ private fun StackCard(
         // texto y logo en azul oscuro); sin seleccionar, una versión tenue.
         isAws && isSelected -> AwsBrandOrange
         isAws -> AwsBrandOrange.copy(alpha = 0.16f).compositeOver(scheme.surfaceContainerHighest)
+        // Cloudflare: igual que AWS, con su naranja (texto y logo en gris
+        // oscuro sobre la tarjeta seleccionada; el blanco no da contraste).
+        isCloudflare && isSelected -> CloudflareBrandOrange
+        isCloudflare -> CloudflareBrandOrange.copy(alpha = 0.16f).compositeOver(scheme.surfaceContainerHighest)
         isSelected -> scheme.primary
         else -> when (index % 3) {
             0 -> scheme.secondaryContainer
@@ -141,6 +146,8 @@ private fun StackCard(
         isOracle -> scheme.onSurface
         isAws && isSelected -> AwsBrandInk
         isAws -> scheme.onSurface
+        isCloudflare && isSelected -> CloudflareBrandInk
+        isCloudflare -> scheme.onSurface
         isSelected -> scheme.onPrimary
         else -> when (index % 3) {
             0 -> scheme.onSecondaryContainer
@@ -179,6 +186,9 @@ private fun StackCard(
                     val tint: Color? = when {
                         isOracle && isSelected -> Color.White
                         isAws && isSelected -> AwsBrandInk
+                        // Cloudflare: sobre su naranja pleno, silueta en gris oscuro
+                        // (el tinte conserva la ranura transparente del logo).
+                        isCloudflare && isSelected -> CloudflareBrandInk
                         else -> null
                     }
                     Image(

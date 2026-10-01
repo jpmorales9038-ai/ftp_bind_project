@@ -58,10 +58,13 @@ import com.rclonebind.app.root.S3Options
 import com.rclonebind.app.root.S3Provider
 import com.rclonebind.app.root.awsEndpoint
 import com.rclonebind.app.root.cleanS3Bucket
+import com.rclonebind.app.root.cloudflareEndpoint
+import com.rclonebind.app.root.cloudflareFieldValue
 import com.rclonebind.app.root.cleanS3Endpoint
 import com.rclonebind.app.root.oracleEndpoint
 import com.rclonebind.app.root.parseOracleEndpoint
 import com.rclonebind.app.root.validateAwsRegion
+import com.rclonebind.app.root.validateCloudflareAccount
 import com.rclonebind.app.root.validateOracleNamespace
 import com.rclonebind.app.root.validateOracleRegion
 import com.rclonebind.app.root.validateS3Bucket
@@ -127,15 +130,19 @@ fun ServerSheet(
     var newToken by remember { mutableStateOf<String?>(null) }
     var driveError by remember { mutableStateOf<String?>(null) }
 
-    // Estado de S3. Con Oracle Cloud basta namespace + región y con Amazon S3 solo
-    // la región (el endpoint se arma solo); "Otro proveedor" deja escribir el
-    // endpoint completo.
+    // Estado de S3. Con Oracle Cloud basta namespace + región, con Amazon S3 solo
+    // la región y con Cloudflare R2 solo el Account ID (el endpoint se arma
+    // solo); "Otro proveedor" deja escribir el endpoint completo.
     val initialS3 = initial?.s3
     val initialOracle = initialS3?.endpoint?.let { parseOracleEndpoint(it) }
     var s3Prov by remember {
         mutableStateOf(initialS3?.let { S3Provider.fromEndpoint(it.endpoint) } ?: S3Provider.ORACLE)
     }
     var s3Namespace by remember { mutableStateOf(initialOracle?.first.orEmpty()) }
+    // Cloudflare R2: Account ID (o el host completo si el bucket es de una jurisdicción).
+    var s3Account by remember {
+        mutableStateOf(initialS3?.endpoint?.let { cloudflareFieldValue(it) }.orEmpty())
+    }
     var s3Region by remember { mutableStateOf(initialS3?.region.orEmpty()) }
     var s3Endpoint by remember {
         mutableStateOf(if (initialOracle == null) initialS3?.endpoint.orEmpty() else "")
@@ -144,6 +151,7 @@ fun ServerSheet(
     var s3Secret by remember { mutableStateOf("") }
     var s3Bucket by remember { mutableStateOf(initialS3?.bucket.orEmpty()) }
     var s3NamespaceError by remember { mutableStateOf<String?>(null) }
+    var s3AccountError by remember { mutableStateOf<String?>(null) }
     var s3RegionError by remember { mutableStateOf<String?>(null) }
     var s3EndpointError by remember { mutableStateOf<String?>(null) }
     var s3AccessKeyError by remember { mutableStateOf<String?>(null) }
@@ -243,7 +251,7 @@ fun ServerSheet(
                             AppIcons.DriveLogo, branded = true
                         ),
                         SelectorOption(
-                            RemoteType.S3, "S3", "Oracle Cloud y otros compatibles",
+                            RemoteType.S3, "S3", "Oracle, Amazon, Cloudflare R2 y más",
                             AppIcons.Cloud
                         )
                     ),
@@ -381,8 +389,11 @@ fun ServerSheet(
                             "Amazon S3: usa una clave de acceso de IAM (Credenciales de seguridad > " +
                                 "Crear clave de acceso) de un usuario con permisos sobre el bucket. " +
                                 "La región es la del bucket."
+                        S3Provider.CLOUDFLARE ->
+                            "Cloudflare R2: crea un token de API (R2 > Administrar tokens de API) con permiso " +
+                                "de lectura y escritura de objetos; te da la Access Key ID y la Secret."
                         S3Provider.OTHER ->
-                            "Cualquier servicio compatible con S3 (MinIO, Wasabi, Backblaze B2, Cloudflare R2...)."
+                            "Cualquier servicio compatible con S3 (MinIO, Wasabi, Backblaze B2...)."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -399,7 +410,11 @@ fun ServerSheet(
                             AppIcons.AwsLogo, branded = true
                         ),
                         SelectorOption(
-                            S3Provider.OTHER, S3Provider.OTHER.label, "MinIO, Wasabi, Backblaze B2, Cloudflare R2...",
+                            S3Provider.CLOUDFLARE, S3Provider.CLOUDFLARE.label, "Sin cargos por salida de datos",
+                            AppIcons.CloudflareLogo, branded = true
+                        ),
+                        SelectorOption(
+                            S3Provider.OTHER, S3Provider.OTHER.label, "MinIO, Wasabi, Backblaze B2...",
                             AppIcons.Cloud
                         )
                     ),
@@ -439,6 +454,25 @@ fun ServerSheet(
                         supportingText = {
                             Text(s3RegionError ?: "Es la región donde se creó el bucket; se ve en la consola de S3.")
                         },
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else if (s3Prov == S3Provider.CLOUDFLARE) {
+                    OutlinedTextField(
+                        value = s3Account,
+                        onValueChange = { s3Account = it.trim(); s3AccountError = null },
+                        label = { Text("Account ID") },
+                        placeholder = { Text("32 caracteres") },
+                        singleLine = true,
+                        isError = s3AccountError != null,
+                        supportingText = {
+                            Text(
+                                s3AccountError
+                                    ?: "Está en el panel de Cloudflare, en R2 > Resumen. Si tu bucket es de " +
+                                        "una jurisdicción (UE, FedRAMP), pega el endpoint completo."
+                            )
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         shape = MaterialTheme.shapes.large,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -705,6 +739,7 @@ fun ServerSheet(
                     } else if (type == RemoteType.S3) {
                         val endpoint: String
                         val region: String
+                        s3AccountError = null
                         if (s3Prov == S3Provider.ORACLE) {
                             s3NamespaceError = validateOracleNamespace(s3Namespace.trim())
                             s3RegionError = validateOracleRegion(s3Region.trim())
@@ -716,6 +751,14 @@ fun ServerSheet(
                             s3RegionError = validateAwsRegion(region)
                             endpoint = awsEndpoint(region)
                             s3NamespaceError = null
+                            s3EndpointError = null
+                        } else if (s3Prov == S3Provider.CLOUDFLARE) {
+                            s3AccountError = validateCloudflareAccount(s3Account)
+                            endpoint = cloudflareEndpoint(s3Account).orEmpty()
+                            // R2 reparte los buckets solo; su región es siempre "auto".
+                            region = "auto"
+                            s3NamespaceError = null
+                            s3RegionError = null
                             s3EndpointError = null
                         } else {
                             endpoint = cleanS3Endpoint(s3Endpoint)
@@ -730,8 +773,8 @@ fun ServerSheet(
                         } else null
                         val bucketClean = cleanS3Bucket(s3Bucket)
                         s3BucketError = validateS3Bucket(bucketClean)
-                        if (nameError == null && s3NamespaceError == null && s3RegionError == null &&
-                            s3EndpointError == null && s3AccessKeyError == null &&
+                        if (nameError == null && s3NamespaceError == null && s3AccountError == null &&
+                            s3RegionError == null && s3EndpointError == null && s3AccessKeyError == null &&
                             s3SecretError == null && s3BucketError == null
                         ) {
                             onSaveS3(

@@ -51,6 +51,7 @@ fun S3PerfSection(vm: BindViewModel, provider: S3Provider) {
                 when (provider) {
                     S3Provider.ORACLE -> "Opciones de Oracle Cloud"
                     S3Provider.AWS -> "Opciones de Amazon S3"
+                    S3Provider.CLOUDFLARE -> "Opciones de Cloudflare R2"
                     S3Provider.OTHER -> "Opciones de S3"
                 },
                 style = MaterialTheme.typography.titleMedium
@@ -62,6 +63,10 @@ fun S3PerfSection(vm: BindViewModel, provider: S3Provider) {
                     S3Provider.AWS ->
                         "Amazon S3 aguanta mucho paralelismo y cobra una fracción por cada mil peticiones, " +
                             "así que por defecto no se recortan; puedes activarlo si quieres gastar menos."
+                    S3Provider.CLOUDFLARE ->
+                        "R2 no cobra por la salida de datos, pero sí por número de peticiones pasado su cupo gratis, " +
+                            "así que por defecto se recortan. La subida paralela arranca en 3 partes: con más, " +
+                            "R2 puede fallar al subir archivos grandes."
                     S3Provider.OTHER ->
                         "Valores para cualquier servicio compatible con S3."
                 },
@@ -118,7 +123,7 @@ fun S3PerfSection(vm: BindViewModel, provider: S3Provider) {
             )
             S3StepSlider(
                 title = "Subida paralela",
-                value = s3.uploadConcurrency ?: S3Perf.UPLOAD_CONC_DEFAULT,
+                value = s3.uploadConcurrency ?: S3Perf.defaultUploadConcurrency(provider),
                 isAuto = s3.uploadConcurrency == null,
                 range = S3Perf.UPLOAD_CONC_MIN..S3Perf.UPLOAD_CONC_MAX,
                 unit = "partes",
@@ -137,7 +142,7 @@ fun S3PerfSection(vm: BindViewModel, provider: S3Provider) {
                     label = { "$it MB" },
                     onSelect = { vm.setS3ChunkMb(it) }
                 )
-                val requested = s3.uploadConcurrency ?: S3Perf.UPLOAD_CONC_DEFAULT
+                val requested = s3.uploadConcurrency ?: S3Perf.defaultUploadConcurrency(provider)
                 val used = S3Perf.effectiveUploadConcurrency(requested, chunk)
                 val ram = S3Perf.uploadRamMb(used, chunk)
                 Text(

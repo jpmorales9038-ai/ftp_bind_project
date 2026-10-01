@@ -321,6 +321,11 @@ object AppIcons {
     val AwsLogoOnDark: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
         buildAwsLogo("AwsLogoOnDark", Color.White)
     }
+
+    /** Logo de Cloudflare: naranja, se lee igual sobre fondo claro y oscuro. */
+    val CloudflareLogo: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        buildCloudflareLogo("CloudflareLogo")
+    }
 }
 
 /**
@@ -345,6 +350,7 @@ fun serverIconFor(profile: RemoteProfile): ServerIcon = when (profile.type) {
     RemoteType.S3 -> when (profile.s3Provider) {
         S3Provider.ORACLE -> ServerIcon(AppIcons.OracleLogo, branded = true)
         S3Provider.AWS -> ServerIcon(AppIcons.AwsLogo, branded = true, onDark = AppIcons.AwsLogoOnDark)
+        S3Provider.CLOUDFLARE -> ServerIcon(AppIcons.CloudflareLogo, branded = true)
         else -> ServerIcon(AppIcons.Cloud, branded = false)
     }
 }

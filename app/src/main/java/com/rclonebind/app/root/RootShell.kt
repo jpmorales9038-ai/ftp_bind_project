@@ -246,23 +246,26 @@ object RootShell {
         val section = LinkedHashMap<String, String>()
         section["type"] = RemoteType.S3.rclone
         // AWS necesita provider=AWS (direccionamiento virtual-hosted y reglas
-        // propias de Amazon). Oracle y el resto de servicios compatibles usan
-        // "Other" (endpoint propio, direccionamiento por ruta). Si el usuario
-        // ya puso a mano otro proveedor conocido, se respeta; el "AWS" viejo de
-        // un servidor que dejó de ser de Amazon se cambia a "Other".
+        // propias de Amazon) y R2 provider=Cloudflare (rclone ajusta por su
+        // cuenta lo que R2 no soporta). Oracle y el resto de servicios
+        // compatibles usan "Other" (endpoint propio, direccionamiento por
+        // ruta). Si el usuario ya puso a mano otro proveedor conocido, se
+        // respeta; el "AWS" o "Cloudflare" viejo de un servidor que dejó de
+        // ser de esos se cambia a "Other".
         val oldProvider = old?.get("provider")
         section["provider"] = when (S3Provider.fromEndpoint(options.endpoint)) {
             S3Provider.AWS -> "AWS"
-            else -> if (oldProvider.isNullOrEmpty() || oldProvider == "AWS") "Other" else oldProvider
+            S3Provider.CLOUDFLARE -> "Cloudflare"
+            else -> if (oldProvider.isNullOrEmpty() || oldProvider == "AWS" || oldProvider == "Cloudflare") "Other" else oldProvider
         }
         section["env_auth"] = old?.get("env_auth") ?: "false"
         section["access_key_id"] = options.accessKeyId
         section["secret_access_key"] = finalSecret
         if (options.region.isNotEmpty()) section["region"] = options.region
         section["endpoint"] = options.endpoint
-        // No intentar crear el bucket al escribir: en Oracle y en AWS (usuario
-        // IAM acotado a un bucket) la clave suele no tener permiso de crear
-        // buckets y rclone fallaría al subir.
+        // No intentar crear el bucket al escribir: en Oracle, en AWS (usuario
+        // IAM acotado a un bucket) y en R2 (token con permisos solo de objetos)
+        // la clave suele no poder crear buckets y rclone fallaría al subir.
         section["no_check_bucket"] = old?.get("no_check_bucket") ?: "true"
         if (options.bucket.isNotEmpty()) section["bind_path"] = options.bucket
         if (old != null) {
