@@ -124,12 +124,13 @@ sequenceDiagram
 - Se monta con `rclone mount` y se expone con `mount --bind` en la **carpeta de destino que elijas** (por defecto `/sdcard/FTP`), con selector de carpetas integrado.
 - **Montar al iniciar**: espera a que el almacenamiento esté desbloqueado y reintenta hasta que haya red.
 - Un **vigilante** restaura el bind si Android o alguna app lo quita.
+- rclone, el vigilante y la precarga corren **fuera del grupo de procesos de la app** (`scripts/proc_detach.sh`): Android no los congela ni los mata al cerrar o minimizar la app, y rclone queda protegido ante el low memory killer.
 - Cambiar de servidor con uno ya montado se hace con un solo botón.
 - Caché de disco acotada para Drive.
 - **Rendimiento** Equilibrado o Máximo: Máximo usa caché completa en FTP, Drive y S3, lectura anticipada de 64 MB y buffers de 16 MB por archivo. Drive y S3 usan por defecto 4 streams de lectura de 16 MB si el binario admite `--vfs-read-chunk-streams`. Las subidas se mantienen en 4 transferencias y 8 verificadores; Drive usa partes de 16 MB. Solo se acelera el pacer si hay `client_id` propio; con el cliente compartido se conservan los valores de rclone. Se agrupan escrituras durante 15 s y los atributos se cachean 1 min. No se fuerza `--vfs-fast-fingerprint`, para no sacrificar detección de cambios externos.
   **Caché**: Máximo permite 1–100 GB (10 por defecto); Equilibrado usa 1 GB e ignora cualquier tamaño personalizado residual. Todos los perfiles intentan conservar 2 GB libres. Los límites de VFS son blandos: archivos abiertos y subidas pendientes pueden superarlos. FTP Equilibrado cachea escrituras, no lecturas.
   **Caché en RAM**: tmpfs opcional solo en Máximo. Se comprueba el tamaño elegido + 2 GB de margen VFS + una reserva para el sistema de al menos 1 GB o el 25% de MemAvailable. No se reserva físicamente toda esa RAM al montar, se consume según se llena. Si no alcanza, se usa disco y queda registrado en Logs. No acelera la red; el contenido se pierde al desmontar/reiniciar y las escrituras pendientes pueden perderse ante un corte o reinicio.
-  **Precarga automática** (`scripts/preload.sh`): solo en Máximo. Descarga en segundo plano hasta el presupuesto configurado menos 512 MB, con límites de tiempo. `config/preload_max_files` permite cambiar el máximo de archivos (20000 por defecto). El progreso aparece en Inicio y se puede relanzar manualmente. Los ajustes de rendimiento S3 son globales, no por servidor, y se aplican al volver a montar.
+  **Precarga automática** (`scripts/preload.sh`): solo en Máximo. Descarga en segundo plano hasta el presupuesto configurado menos 512 MB (contado en bytes exactos), con límites de tiempo, empezando por los archivos más pequeños. `config/preload_max_files` permite cambiar el máximo de archivos (20000 por defecto). El progreso aparece en Inicio y se puede relanzar manualmente. Los ajustes de rendimiento S3 son globales, no por servidor, y se aplican al volver a montar.
   El botón **Probar rendimiento** abre una hoja con la prueba (`scripts/perf_test.sh`, con root): comprueba
   que las opciones con las que corre rclone son las de la configuración actual (avisa si cambiaste el perfil o la
   caché sin volver a montar), que hay espacio para la caché, que el listado funciona, y mide escritura y lectura
@@ -176,7 +177,7 @@ sequenceDiagram
 </p>
 
 
-## Desarrollo y validación (1.9.8)
+## Desarrollo y validación (1.9.9)
 
 Este ZIP es código fuente, **no un módulo flasheable ni un APK compilado**.
 El archivo de origen no incluía Gradle Wrapper, workflows ni los binarios de rclone/fusermount3.

@@ -25,7 +25,7 @@ object ModulePaths {
     const val S3_DIR_CACHE_MIN = "s3_dir_cache_min"
     const val STATUS_FILE = "$BASE/status.json"
     const val LOG_FILE = "$BASE/mount.log"
-    /** Progreso de la precarga de assets (lo escribe scripts/preload.sh). */
+    /** Progreso de la precarga (lo escribe scripts/preload.sh). */
     const val PRELOAD_STATUS_FILE = "$BASE/preload_status.json"
     /** Salida temporal de `rclone authorize` (contiene el token: se borra al terminar). */
     const val AUTH_OUT = "$BASE/auth.out"
@@ -60,7 +60,7 @@ object RootShell {
 
     fun status(): Result = run("cat ${ModulePaths.STATUS_FILE} 2>/dev/null || echo '{\"mounted\":false}'")
 
-    // ---- Precarga de assets (perfil Máximo / Drive): ver scripts/preload.sh ----
+    // ---- Precarga (perfil Máximo / Drive): ver scripts/preload.sh ----
 
     /**
      * Relanza la precarga aunque ya haya una corriendo o recién terminada.

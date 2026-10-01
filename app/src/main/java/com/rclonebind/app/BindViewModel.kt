@@ -98,7 +98,7 @@ class BindViewModel : ViewModel() {
         private set
     var perfTest by mutableStateOf(PerfTestState())
         private set
-    /** Progreso de la precarga de assets a la caché (SectionCard de Inicio en perfil Máximo). Null = no aplica. */
+    /** Progreso de la precarga de archivos a la caché (SectionCard de Inicio en perfil Máximo). Null = no aplica. */
     var preloadStatus by mutableStateOf<PreloadStatus?>(null)
         private set
     /** Mensaje de una sola vez; la UI lo muestra en un snackbar y lo consume. */
@@ -621,7 +621,7 @@ class BindViewModel : ViewModel() {
         const val PERF_TIMEOUT_MS = 300_000L
         // El script corta a los 300 s; esto es solo la red de seguridad de la app.
         const val AUTH_TIMEOUT_MS = 330_000L
-        // La precarga puede bajar varios GB de assets de juego: se sondea
+        // La precarga puede bajar varios GB de archivos: se sondea
         // sin apuro y con un margen amplio antes de dar por perdido el seguimiento
         // (el script en sí no tiene límite de tiempo, sigue en segundo plano).
         const val PRELOAD_POLL_MS = 1500L

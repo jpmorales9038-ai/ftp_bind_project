@@ -30,8 +30,13 @@ android {
         applicationId = "com.rclonebind.app"
         minSdk = 26
         targetSdk = 34
+<<<<<<< Updated upstream
         versionCode = 46
         versionName = "1.9.8"
+=======
+        versionCode = 47
+        versionName = "1.9.9"
+>>>>>>> Stashed changes
 
         // Cliente OAuth de Google Drive que trae la app: el usuario solo da su
         // consentimiento, sin pegar credenciales. Se inyecta en el build desde
