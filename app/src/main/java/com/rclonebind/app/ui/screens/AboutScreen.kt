@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -184,8 +185,9 @@ private fun LinksCard(uriHandler: UriHandler) {
         OutlinedButton(onClick = { uriHandler.openUri(RCLONE_URL) }, modifier = Modifier.fillMaxWidth()) {
             Text("Sitio de rclone")
         }
+        HorizontalDivider()
         Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally)
         ) {
             SocialButton(AppIcons.X, "X (@cruzmartinlbdt)") { uriHandler.openUri(X_URL) }
@@ -202,10 +204,10 @@ private fun SocialButton(icon: ImageVector, contentDescription: String, onClick:
         shape = CircleShape,
         color = scheme.surfaceContainerHighest,
         contentColor = scheme.onSurfaceVariant,
-        modifier = Modifier.size(56.dp)
+        modifier = Modifier.size(40.dp)
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = contentDescription, modifier = Modifier.size(24.dp))
+            Icon(icon, contentDescription = contentDescription, modifier = Modifier.size(16.dp))
         }
     }
 }
