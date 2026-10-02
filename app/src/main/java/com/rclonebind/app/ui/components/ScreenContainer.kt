@@ -187,7 +187,7 @@ fun ScreenContainer(
             // fija con scroll propio y un degradado la taparía.
             val fadeExtraPx = fadeExtra.roundToPx()
             val fade = if (scroll && title != null) {
-                subcompose("fade") { TopFade(scrollState, fadeExtraPx.toFloat(), topHazeState) }
+                subcompose("fade") { TopFade(scrollState, TopFadeRampDistance.roundToPx().toFloat(), topHazeState) }
                     .map { it.measure(Constraints.fixed(w, titleH + fadeExtraPx)) }
             } else emptyList()
 
@@ -202,13 +202,12 @@ fun ScreenContainer(
 }
 
 /**
- * Cuánto se ve el difuminado ya en reposo (antes de desplazar nada). Antes
- * era 0 (invisible en reposo), pero sin nada detrás, el título quedaba
- * demasiado pegado al contenido de la primera tarjeta (p. ej. "Inicio" tocando
- * "Montado"). Este piso le da al título un fondo tenue desde el principio;
- * [TopFade] sigue intensificándolo igual a medida que se desplaza.
+ * Distancia de desplazamiento (en dp) en la que el difuminado de la barra
+ * pasa de invisible a completo. En reposo (scroll = 0) NO se dibuja nada
+ * (ni desenfoque ni tinte), para no estropear los textos que quedan justo
+ * debajo del título; aparece apenas se empieza a deslizar.
  */
-private const val TopFadeRestAlpha = 0.45f
+private val TopFadeRampDistance = 24.dp
 
 /**
  * Puntos del degradado: una sola curva en coseno de punta a punta, de opaco
@@ -237,22 +236,30 @@ private fun topFadeStops(fade: Color, maxAlpha: Float = 1f): Array<Pair<Float, C
  *
  * - El desenfoque es PROGRESIVO: máximo arriba y se desvanece hacia el
  *   borde inferior de la franja, así no queda una línea dura donde termina.
- * - Encima va un tinte del color de fondo con la misma curva en coseno de
- *   siempre (más opaco arriba): da legibilidad al título y es el único
+ * - Encima va un tinte del color de fondo con una curva en coseno
+ *   (más opaco arriba): da legibilidad al título y es el único
  *   efecto en Android < 12, donde no hay desenfoque de verdad.
  * - Cubre TODA la barra (título y acciones) más una franja extra por
- *   debajo; el título se dibuja encima, siempre nítido. El tinte nunca baja
- *   de [TopFadeRestAlpha] y crece hasta completo tras [rampPx] de
- *   desplazamiento (el alpha se lee dentro de graphicsLayer: se anima sin
- *   recomponer). No intercepta toques.
+ *   debajo; el título se dibuja encima, siempre nítido. Es invisible en
+ *   reposo y aparece (blur + tinte) en cuanto se empieza a desplazar,
+ *   completo tras [rampPx]. No intercepta toques.
  */
 @OptIn(ExperimentalHazeApi::class)
 @Composable
 private fun TopFade(scrollState: ScrollState, rampPx: Float, hazeState: HazeState) {
     val fade = MaterialTheme.colorScheme.background
-    Box(Modifier.fillMaxSize()) {
-        // Capa 1: el desenfoque (siempre a tope; en reposo no hay nada
-        // debajo que desenfocar, así que no se nota hasta que hay contenido).
+    // Todo el difuminado (blur + tinte) comparte un solo alpha ligado al
+    // scroll: 0 en reposo (con alpha 0 Compose ni siquiera lo dibuja) y 1
+    // tras [rampPx]. Se lee dentro de graphicsLayer, así que se anima sin
+    // recomponer.
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                alpha = (scrollState.value / rampPx).coerceIn(0f, 1f)
+            }
+    ) {
+        // Capa 1: el desenfoque.
         Box(
             Modifier
                 .fillMaxSize()
@@ -267,14 +274,10 @@ private fun TopFade(scrollState: ScrollState, rampPx: Float, hazeState: HazeStat
                     )
                 }
         )
-        // Capa 2: tinte en degradado que crece al desplazar.
+        // Capa 2: tinte en degradado.
         Box(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer {
-                    val scrolled = (scrollState.value / rampPx).coerceIn(0f, 1f)
-                    alpha = TopFadeRestAlpha + (1f - TopFadeRestAlpha) * scrolled
-                }
                 .background(Brush.verticalGradient(*topFadeStops(fade, TopTintMaxAlpha)))
         )
     }
