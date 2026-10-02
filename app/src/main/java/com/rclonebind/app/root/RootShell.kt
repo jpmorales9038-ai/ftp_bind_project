@@ -25,7 +25,7 @@ object ModulePaths {
     const val S3_DIR_CACHE_MIN = "s3_dir_cache_min"
     const val STATUS_FILE = "$BASE/status.json"
     const val LOG_FILE = "$BASE/mount.log"
-    /** Progreso de la precarga de assets (lo escribe scripts/preload.sh). */
+    /** Progreso de la precarga (lo escribe scripts/preload.sh). */
     const val PRELOAD_STATUS_FILE = "$BASE/preload_status.json"
     /** Salida temporal de `rclone authorize` (contiene el token: se borra al terminar). */
     const val AUTH_OUT = "$BASE/auth.out"
@@ -60,7 +60,7 @@ object RootShell {
 
     fun status(): Result = run("cat ${ModulePaths.STATUS_FILE} 2>/dev/null || echo '{\"mounted\":false}'")
 
-    // ---- Precarga de assets (perfil Máximo / Drive): ver scripts/preload.sh ----
+    // ---- Precarga (perfil Máximo / Drive): ver scripts/preload.sh ----
 
     /**
      * Relanza la precarga aunque ya haya una corriendo o recién terminada.
@@ -324,8 +324,15 @@ object RootShell {
         return PerfMode.entries.firstOrNull { it.id == v } ?: PerfMode.BALANCED
     }
 
-    fun setPerfMode(mode: PerfMode): Result =
-        run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' ${sq(mode.id)} > ${ModulePaths.PERF_FILE}")
+    private fun writePerfValue(path: String, value: String): Result = run(
+        "mkdir -p ${ModulePaths.CONFIG_DIR} && " +
+            "printf '%s' ${sq(value)} > $path.tmp && mv -f $path.tmp $path"
+    )
+
+    fun setPerfMode(mode: PerfMode): Result {
+        val result = writePerfValue(ModulePaths.PERF_FILE, mode.id)
+        return if (result.success && mode == PerfMode.BALANCED) setCacheGb(null) else result
+    }
 
     /** Tamaño de caché elegido (GB), o null si se usa el del perfil. */
     fun readCacheGb(): Int? =
@@ -333,9 +340,11 @@ object RootShell {
             .joinToString("").trim().toIntOrNull()?.takeIf { it in CACHE_GB_MIN..CACHE_GB_MAX }
 
     /** Con [gb] null se borra el ajuste y vuelve al tamaño del perfil. */
-    fun setCacheGb(gb: Int?): Result =
-        if (gb == null) run("rm -f ${ModulePaths.CACHE_GB_FILE}")
-        else run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' $gb > ${ModulePaths.CACHE_GB_FILE}")
+    fun setCacheGb(gb: Int?): Result {
+        require(gb == null || gb in CACHE_GB_MIN..CACHE_GB_MAX) { "Tamaño de caché fuera de rango" }
+        return if (gb == null) run("rm -f ${ModulePaths.CACHE_GB_FILE}")
+        else writePerfValue(ModulePaths.CACHE_GB_FILE, gb.toString())
+    }
 
     /**
      * Caché en RAM del perfil Máximo. Guarda solo lo que el usuario pidió:
@@ -346,7 +355,7 @@ object RootShell {
         Shell.cmd("cat ${ModulePaths.RAM_CACHE_FILE} 2>/dev/null").exec().out.joinToString("").trim() == "1"
 
     fun setRamCache(enabled: Boolean): Result =
-        if (enabled) run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '1' > ${ModulePaths.RAM_CACHE_FILE}")
+        if (enabled) writePerfValue(ModulePaths.RAM_CACHE_FILE, "1")
         else run("rm -f ${ModulePaths.RAM_CACHE_FILE}")
 
     // ---- Rendimiento de S3 (un archivo por ajuste; ausente = automático) ----
@@ -378,13 +387,23 @@ object RootShell {
     }
 
     /** Con [value] null se borra el archivo y el ajuste vuelve a automático. */
-    fun setS3PerfValue(file: String, value: Int?): Result =
-        if (value == null) run("rm -f ${ModulePaths.CONFIG_DIR}/$file")
-        else run("mkdir -p ${ModulePaths.CONFIG_DIR} && printf '%s' $value > ${ModulePaths.CONFIG_DIR}/$file")
+    fun setS3PerfValue(file: String, value: Int?): Result {
+        val valid = when (file) {
+            ModulePaths.S3_STREAMS -> value == null || value in S3Perf.STREAMS_MIN..S3Perf.STREAMS_MAX
+            ModulePaths.S3_UPLOAD_CONC -> value == null || value in S3Perf.UPLOAD_CONC_MIN..S3Perf.UPLOAD_CONC_MAX
+            ModulePaths.S3_CHUNK_MB -> value == null || value in S3Perf.CHUNK_CHOICES_MB
+            ModulePaths.S3_FEWER_REQ -> value == null || value in 0..1
+            ModulePaths.S3_DIR_CACHE_MIN -> value == null || value in 1..1440
+            else -> false
+        }
+        require(valid) { "Ajuste S3 no válido" }
+        val path = "${ModulePaths.CONFIG_DIR}/$file"
+        return if (value == null) run("rm -f $path") else writePerfValue(path, value.toString())
+    }
 
     fun resetS3Perf(): Result =
         run(
-            "cd ${ModulePaths.CONFIG_DIR} && rm -f ${ModulePaths.S3_STREAMS} ${ModulePaths.S3_UPLOAD_CONC} " +
+            "mkdir -p ${ModulePaths.CONFIG_DIR} && cd ${ModulePaths.CONFIG_DIR} && rm -f ${ModulePaths.S3_STREAMS} ${ModulePaths.S3_UPLOAD_CONC} " +
                 "${ModulePaths.S3_CHUNK_MB} ${ModulePaths.S3_FEWER_REQ} ${ModulePaths.S3_DIR_CACHE_MIN}"
         )
 

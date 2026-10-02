@@ -1,14 +1,13 @@
-*.iml
 .gradle/
-/local.properties
+.kotlin/
+**/build/
+local.properties
 .idea/
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-*.apk
-*.aab
-
-# El binario de rclone se descarga en build/release, no se versiona pesado en git
+*.iml
+__pycache__/
+*.pyc
 module/bin/rclone
+module/bin/fusermount3
+module/app.apk
+*.jks
+# La clave debug existente se conserva intencionalmente; no añadir claves privadas.

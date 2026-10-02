@@ -59,4 +59,4 @@ else
     ui_print "- AVISO: el zip no trae app.apk"
 fi
 
-ui_print "- Configura el servidor (FTP o Google Drive) desde la app antes de montar"
+ui_print "- Configura el servidor (FTP, Google Drive o S3) desde la app antes de montar"
