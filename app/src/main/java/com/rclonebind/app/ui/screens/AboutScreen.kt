@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -30,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.style.TextAlign
@@ -47,6 +50,8 @@ import kotlinx.coroutines.withContext
 
 private const val REPO_URL = "https://github.com/jpmorales9038-ai/ftp_bind_project"
 private const val RCLONE_URL = "https://rclone.org"
+private const val X_URL = "https://x.com/cruzmartinlbdt"
+private const val TELEGRAM_URL = "https://t.me/lcruz_23"
 
 @Composable
 fun AboutScreen(vm: BindViewModel) {
@@ -178,6 +183,29 @@ private fun LinksCard(uriHandler: UriHandler) {
         }
         OutlinedButton(onClick = { uriHandler.openUri(RCLONE_URL) }, modifier = Modifier.fillMaxWidth()) {
             Text("Sitio de rclone")
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally)
+        ) {
+            SocialButton(AppIcons.X, "X (@cruzmartinlbdt)") { uriHandler.openUri(X_URL) }
+            SocialButton(AppIcons.Telegram, "Telegram (@lcruz_23)") { uriHandler.openUri(TELEGRAM_URL) }
+        }
+    }
+}
+
+@Composable
+private fun SocialButton(icon: ImageVector, contentDescription: String, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = scheme.surfaceContainerHighest,
+        contentColor = scheme.onSurfaceVariant,
+        modifier = Modifier.size(56.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = contentDescription, modifier = Modifier.size(24.dp))
         }
     }
 }

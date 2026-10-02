@@ -253,6 +253,20 @@ object AppIcons {
         )
     }
 
+    val X: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        icon(
+            "X",
+            "M18.901,1.153h3.68l-8.04,9.19L24,22.846h-7.406l-5.8,-7.584l-6.638,7.584H0.474l8.6,-9.83L0,1.154h7.594l5.243,6.932ZM17.61,20.644h2.039L6.486,3.24H4.298Z"
+        )
+    }
+
+    val Telegram: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        icon(
+            "Telegram",
+            "M9.78,18.65l0.28,-4.23l7.68,-6.92c0.34,-0.31 -0.07,-0.46 -0.52,-0.19L7.74,13.3L3.64,12c-0.88,-0.25 -0.89,-0.86 0.2,-1.3l15.97,-6.16c0.73,-0.33 1.43,0.18 1.15,1.3l-2.72,12.81c-0.19,0.91 -0.74,1.13 -1.5,0.71L12.6,16.3l-1.99,1.93c-0.23,0.23 -0.42,0.42 -0.83,0.42Z"
+        )
+    }
+
     /**
      * Logotipo de Google Drive con sus seis facetas (verde, verde oscuro,
      * amarillo, naranja, azul y azul oscuro), trazado sobre un viewport de
