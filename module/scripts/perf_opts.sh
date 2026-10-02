@@ -104,7 +104,13 @@ MOUNT_FLAGS_HELP=""
 s3_flags_load() {
     S3_FLAGS_HELP=""
     [ -x "$MODDIR/bin/rclone" ] || return 0
-    S3_FLAGS_HELP="$("$MODDIR/bin/rclone" help flags 's3-|use-server-modtime' 2>/dev/null)" || S3_FLAGS_HELP=""
+    # Las opciones de los backends (--s3-*) solo salen en "help flags" con
+    # --all en las versiones recientes; las viejas no conocen --all. Se prueba
+    # primero con --all y, si no devuelve nada, sin él.
+    S3_FLAGS_HELP="$("$MODDIR/bin/rclone" help flags --all 's3-|use-server-modtime' 2>/dev/null)" || S3_FLAGS_HELP=""
+    if [ -z "$S3_FLAGS_HELP" ]; then
+        S3_FLAGS_HELP="$("$MODDIR/bin/rclone" help flags 's3-|use-server-modtime' 2>/dev/null)" || S3_FLAGS_HELP=""
+    fi
 }
 s3_has_flag() {
     printf '%s\n' "$S3_FLAGS_HELP" | grep -qE -- "--$1([[:space:]=]|$)"
@@ -236,8 +242,17 @@ compute_mount_opts() {
             ;;
     esac
 
+    # Carpetas en S3: S3 no tiene carpetas, solo objetos con "/" en el nombre.
+    # Una carpeta vacía creada desde el explorador solo existe en la memoria de
+    # rclone y desaparece al desmontar, salvo que se suba un objeto marcador
+    # "carpeta/" (--s3-directory-markers, rclone 1.64+). Antes la opción solo
+    # se añadía si "rclone help flags" la listaba, y esa lista no incluye las
+    # opciones de los backends sin --all: la opción no se aplicaba nunca. Ahora
+    # también se aplica si la versión del binario es 1.64 o más nueva.
     if [ "$(remote_type "$ACTIVE")" = s3 ]; then
-        s3_has_flag s3-directory-markers && MOUNT_OPTS="$MOUNT_OPTS --s3-directory-markers"
+        if s3_has_flag s3-directory-markers || rclone_at_least 1 64; then
+            MOUNT_OPTS="$MOUNT_OPTS --s3-directory-markers"
+        fi
     fi
 
     case "$MOUNT_OPTS" in

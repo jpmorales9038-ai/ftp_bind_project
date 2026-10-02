@@ -196,6 +196,18 @@ fi
 
 echo "$(date): opciones de montaje: $MOUNT_OPTS" >> "$LOG_FILE"
 
+# S3: respaldo por variable de entorno para que las carpetas vacías creadas
+# desde el explorador se guarden como objeto marcador "carpeta/" y no se
+# pierdan al desmontar. rclone ignora las variables RCLONE_* de opciones que su
+# versión no conoce, así que en un binario viejo no hace nada.
+if [ "$(remote_type "$ACTIVE")" = s3 ]; then
+    export RCLONE_S3_DIRECTORY_MARKERS=true
+    case "$MOUNT_OPTS" in
+        *--s3-directory-markers*) ;;
+        *) echo "$(date): aviso: rclone no reconoce --s3-directory-markers (se necesita 1.64+); las carpetas vacías se perderán al desmontar" >> "$LOG_FILE" ;;
+    esac
+fi
+
 # S3: si el servidor tiene bucket (bind_path) se monta ese bucket y no la lista
 # de todos; útil cuando la cuenta no puede listar buckets (p. ej. Oracle).
 REMOTE_ROOT="$(remote_root "$ACTIVE")"

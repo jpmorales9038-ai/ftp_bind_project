@@ -36,8 +36,29 @@ while [ "$i" -lt 10 ] && umount -l "$TARGET_PATH" 2>/dev/null; do
 done
 umount -l "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE" || "$MODDIR/bin/fusermount3" -u "$RCLONE_MOUNTPOINT" 2>>"$LOG_FILE"
 
-# Por si el mount corre como proceso en background
+# ¿Sigue vivo algún "rclone mount"? (se lee /proc: no depende de pgrep/pkill -0)
+rclone_alive() {
+    for d in /proc/[0-9]*; do
+        c="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)"
+        case "$c" in
+            "$MODDIR/bin/rclone mount "*) return 0 ;;
+        esac
+    done
+    return 1
+}
+# Por si el mount corre como proceso en background. Se pide el cierre normal
+# (TERM) y se espera hasta 20 s a que rclone termine de subir lo pendiente
+# (carpetas, archivos en --vfs-write-back); solo si no sale a tiempo se fuerza.
 pkill -f "$MODDIR/bin/rclone mount" 2>/dev/null
+i=0
+while [ "$i" -lt 40 ] && rclone_alive; do
+    sleep 0.5 2>/dev/null || sleep 1
+    i=$((i + 1))
+done
+if rclone_alive; then
+    echo "$(date): rclone no terminó en 20 s, se fuerza el cierre" >> "$LOG_FILE"
+    pkill -9 -f "$MODDIR/bin/rclone mount" 2>/dev/null
+fi
 
 # Corta la precarga automática si seguía corriendo: el mount ya no existe,
 # seguir leyendo archivos ahí solo daría errores.
