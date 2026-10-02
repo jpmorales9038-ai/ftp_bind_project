@@ -49,6 +49,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.rclonebind.app.ui.theme.AppMotion
+import dev.chrisbanes.haze.ExperimentalHazeApi
+import dev.chrisbanes.haze.HazeProgressive
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.isActive
 import kotlin.math.PI
 import kotlin.math.cos
@@ -95,11 +102,16 @@ val DualPaneContentWidth = 1080.dp
 private val TopFadeExtra = 32.dp
 private val TopFadeExtraLandscape = 16.dp
 
+/** Radio del desenfoque de fondo de la barra del título (la píldora inferior usa 24dp). */
+private val TopBlurRadius = 28.dp
+
+/** Opacidad máxima (arriba) del tinte que acompaña al desenfoque: menos que antes, porque ahora el blur ya oculta el contenido. */
+private const val TopTintMaxAlpha = 0.75f
+
 /**
  * Pantalla con encabezado fijo grande (título + acciones a la derecha) y
  * contenido desplazable debajo. El contenido pasa POR DEBAJO de toda la barra
- * del título y se funde con el fondo con el mismo degradado que la barra de
- * gestos inferior, espejado (ver [TopFade]).
+ * del título y queda desenfocado (vidrio esmerilado progresivo, ver [TopFade]).
  *
  * El ancho del contenido se centra y tiene un máximo para que en pantallas
  * angostas (celular en vertical) no cambie nada, pero en pantallas anchas
@@ -129,6 +141,10 @@ fun ScreenContainer(
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val fadeExtra = if (isLandscape) TopFadeExtraLandscape else TopFadeExtra
     val endInset = LocalContentEndInset.current
+    // Estado propio del desenfoque de la barra del título: la fuente es el
+    // cuerpo de ESTA pantalla y el efecto es el difuminado de arriba (son
+    // hermanos, no uno dentro del otro).
+    val topHazeState = rememberHazeState()
 
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         // Se mide primero la barra del título para saber su alto real y
@@ -161,14 +177,17 @@ fun ScreenContainer(
             val titleH = titleBar.sumOf { it.height }
 
             val body = subcompose("body") {
-                ScreenBody(Modifier.fillMaxSize(), scroll, scrollState, titleH.toDp(), content)
+                val bodyModifier = if (scroll && title != null) {
+                    Modifier.fillMaxSize().hazeSource(topHazeState)
+                } else Modifier.fillMaxSize()
+                ScreenBody(bodyModifier, scroll, scrollState, titleH.toDp(), content)
             }.map { it.measure(Constraints.fixed(w, (h - indH).coerceAtLeast(0))) }
 
             // Solo si la pantalla desplaza su contenido: Logs usa una tarjeta
             // fija con scroll propio y un degradado la taparía.
             val fadeExtraPx = fadeExtra.roundToPx()
             val fade = if (scroll && title != null) {
-                subcompose("fade") { TopFade(scrollState, fadeExtraPx.toFloat()) }
+                subcompose("fade") { TopFade(scrollState, fadeExtraPx.toFloat(), topHazeState) }
                     .map { it.measure(Constraints.fixed(w, titleH + fadeExtraPx)) }
             } else emptyList()
 
@@ -201,37 +220,64 @@ private const val TopFadeRestAlpha = 0.45f
  * oscurecer algo más la parte de arriba de la barra, pero el degradado se ve
  * continuo en vez de tener un tramo fijo y después un escalón.
  */
-private fun topFadeStops(fade: Color): Array<Pair<Float, Color>> {
+private fun topFadeStops(fade: Color, maxAlpha: Float = 1f): Array<Pair<Float, Color>> {
     val steps = 10
     return Array(steps + 1) { i ->
         val u = i / steps.toFloat()
         val eased = 0.5f * (1f + cos(PI.toFloat() * u)) // 1 en u=0, 0 en u=1, suave en el medio
-        u to fade.copy(alpha = eased)
+        u to fade.copy(alpha = eased * maxAlpha)
     }
 }
 
 /**
- * Difuminado de la barra del título: mismo degradado que el de la barra de
- * gestos pero espejado y más opaco arriba. Cubre TODA la barra (título y
- * acciones) más una franja extra por debajo, y la curva recorre esa altura
- * entera: también pasa por detrás de la palabra del título (que se sigue
- * dibujando encima, siempre nítida). Nunca baja de [TopFadeRestAlpha] (para
- * que el título siempre tenga algo de fondo) y crece desde ahí hasta
- * completo tras recorrer [rampPx] de desplazamiento. El alpha se lee dentro
- * de graphicsLayer: se anima sin recomponer. No intercepta toques.
+ * Desenfoque de la barra del título, estilo "vidrio esmerilado" (como el
+ * fondo de los paneles de One UI): el contenido que se desplaza por debajo
+ * se ve realmente desenfocado (backdrop blur de Haze, el mismo que usa la
+ * píldora inferior), no solo cubierto por un degradado de color.
+ *
+ * - El desenfoque es PROGRESIVO: máximo arriba y se desvanece hacia el
+ *   borde inferior de la franja, así no queda una línea dura donde termina.
+ * - Encima va un tinte del color de fondo con la misma curva en coseno de
+ *   siempre (más opaco arriba): da legibilidad al título y es el único
+ *   efecto en Android < 12, donde no hay desenfoque de verdad.
+ * - Cubre TODA la barra (título y acciones) más una franja extra por
+ *   debajo; el título se dibuja encima, siempre nítido. El tinte nunca baja
+ *   de [TopFadeRestAlpha] y crece hasta completo tras [rampPx] de
+ *   desplazamiento (el alpha se lee dentro de graphicsLayer: se anima sin
+ *   recomponer). No intercepta toques.
  */
+@OptIn(ExperimentalHazeApi::class)
 @Composable
-private fun TopFade(scrollState: ScrollState, rampPx: Float) {
+private fun TopFade(scrollState: ScrollState, rampPx: Float, hazeState: HazeState) {
     val fade = MaterialTheme.colorScheme.background
-    Box(
-        Modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                val scrolled = (scrollState.value / rampPx).coerceIn(0f, 1f)
-                alpha = TopFadeRestAlpha + (1f - TopFadeRestAlpha) * scrolled
-            }
-            .background(Brush.verticalGradient(*topFadeStops(fade)))
-    )
+    Box(Modifier.fillMaxSize()) {
+        // Capa 1: el desenfoque (siempre a tope; en reposo no hay nada
+        // debajo que desenfocar, así que no se nota hasta que hay contenido).
+        Box(
+            Modifier
+                .fillMaxSize()
+                .hazeEffect(state = hazeState) {
+                    backgroundColor = fade
+                    blurRadius = TopBlurRadius
+                    noiseFactor = 0f
+                    tints = listOf(HazeTint(fade.copy(alpha = 0.30f)))
+                    progressive = HazeProgressive.verticalGradient(
+                        startIntensity = 1f,
+                        endIntensity = 0f
+                    )
+                }
+        )
+        // Capa 2: tinte en degradado que crece al desplazar.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val scrolled = (scrollState.value / rampPx).coerceIn(0f, 1f)
+                    alpha = TopFadeRestAlpha + (1f - TopFadeRestAlpha) * scrolled
+                }
+                .background(Brush.verticalGradient(*topFadeStops(fade, TopTintMaxAlpha)))
+        )
+    }
 }
 
 @Composable
